@@ -45,6 +45,8 @@ import { FieldModule } from "./FieldModule";
 import { ProjectAreaControl } from "./ProjectAreaControl";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { LandDraftTools } from "./LandDraftTools";
+import { ButtonHelpSettings } from "@/components/ui/ButtonHelpSettings";
+import { FeatureAttributesWindow } from "./FeatureAttributesWindow";
 
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
@@ -120,6 +122,7 @@ function MobileShell() {
         <WorkspaceRecoveryNotice />
       </div>
       <MapCanvas />
+      <FeatureAttributesWindow />
       {!fieldMode && <SelectionToolbar mobile />}
 
       <header className="mobile-primary-header pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-1.5 p-2 pt-[max(.5rem,env(safe-area-inset-top))] min-[520px]:gap-2 min-[520px]:p-3 min-[520px]:pt-[max(.75rem,env(safe-area-inset-top))]">
@@ -233,7 +236,7 @@ function MobileShell() {
                   : sheet === "draw"
                     ? "Draw and measure"
                     : sheet === "help"
-                      ? "Help & tours"
+                      ? "Help & settings"
                       : sheet === "projects"
                         ? "Projects and settings"
                         : "Export"}
@@ -483,6 +486,7 @@ function MobileTourMenu({ onDone }: { onDone: () => void }) {
         />
         Offer tours when major new features are added
       </label>
+      <ButtonHelpSettings compact />
       <div className="flex items-center justify-between rounded-xl bg-secondary px-3 py-2">
         <span className="font-medium">LandDraft version</span>
         <span className="font-mono text-[10px]">

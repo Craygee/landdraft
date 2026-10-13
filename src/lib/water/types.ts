@@ -3,7 +3,12 @@ import type { Feature, MultiPolygon, Point, Polygon } from "geojson";
 export type WaterClassification = "OBSERVED" | "DERIVED" | "INTERPOLATED" | "MODELED" | "INFERRED";
 export type WaterArea = Feature<Polygon | MultiPolygon>;
 export type WaterSourceId =
-  "usgs-sites" | "twdb-wells" | "usgs-measurements" | "twdb-aquifers" | "twdb-minor-aquifers";
+  | "usgs-sites"
+  | "twdb-wells"
+  | "twdb-well-reports"
+  | "usgs-measurements"
+  | "twdb-aquifers"
+  | "twdb-minor-aquifers";
 export interface WaterSource {
   id: WaterSourceId;
   agency: string;
@@ -80,6 +85,15 @@ export interface AquiferStudySummary {
   minimumDepthFt: number | null;
   medianDepthFt: number | null;
   maximumDepthFt: number | null;
+  depthSurfaceStatus: "AVAILABLE" | "INSUFFICIENT_DATA";
+  yieldSampleCount: number;
+  minimumYieldGpm: number | null;
+  medianYieldGpm: number | null;
+  maximumYieldGpm: number | null;
+  yieldSurfaceStatus: "AVAILABLE" | "INSUFFICIENT_DATA";
+  reportedUses: Record<string, number>;
+  earliestCompletionYear: number | null;
+  latestCompletionYear: number | null;
   storageVolumeStatus: "UNAVAILABLE";
   storageVolumeReason: string;
 }
@@ -99,7 +113,7 @@ export interface InterpolationStudySummary {
 }
 
 export interface HydrogeologyStudies {
-  version: "hydro-screening-1";
+  version: "hydro-screening-1" | "hydro-screening-2";
   generatedAt: string;
   wellCount: number;
   depthSampleCount: number;
@@ -107,6 +121,33 @@ export interface HydrogeologyStudies {
   aquifers: AquiferStudySummary[];
   interpolation: InterpolationStudySummary[];
   limitations: string[];
+}
+
+export interface WellSiteAquiferProfile {
+  name: string;
+  extentType: AquiferStudySummary["extentType"];
+  depthSampleCount: number;
+  estimatedCompletionDepthFt: number | null;
+  minimumCompletionDepthFt: number | null;
+  maximumCompletionDepthFt: number | null;
+  yieldSampleCount: number;
+  estimatedYieldGpm: number | null;
+  minimumYieldGpm: number | null;
+  maximumYieldGpm: number | null;
+  nearbyReportedUses: Record<string, number>;
+  earliestCompletionYear: number | null;
+  latestCompletionYear: number | null;
+  nearestWellMiles: number | null;
+  confidence: "LOW" | "MODERATE" | "HIGH";
+  limitation: string;
+}
+
+export interface WellSiteProfile {
+  coordinate: [number, number];
+  searchRadiusMiles: number;
+  generatedAt: string;
+  aquifers: WellSiteAquiferProfile[];
+  limitation: string;
 }
 export interface WaterWorkspaceState {
   version: 1;

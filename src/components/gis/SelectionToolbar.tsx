@@ -5,6 +5,7 @@ import {
   FileUp,
   GitBranchPlus,
   ListPlus,
+  ListTree,
   MapPinPlus,
   Minus,
   Pentagon,
@@ -229,8 +230,13 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
           />
         )}
         <Action
+          icon={<ListTree />}
+          label="Full attributes"
+          onClick={() => window.dispatchEvent(new Event("landdraft:open-feature-attributes"))}
+        />
+        <Action
           icon={<Table2 />}
-          label="Attributes"
+          label="Layer table"
           onClick={() => {
             wb.setActiveLayer(first.layer.id);
             setTableOpen(true);

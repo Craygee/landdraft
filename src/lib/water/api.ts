@@ -10,6 +10,7 @@ export const analyzeWaterSource = createServerFn({ method: "POST" })
       ![
         "usgs-sites",
         "twdb-wells",
+        "twdb-well-reports",
         "usgs-measurements",
         "twdb-aquifers",
         "twdb-minor-aquifers",

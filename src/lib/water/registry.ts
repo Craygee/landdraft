@@ -79,6 +79,22 @@ export const WATER_SOURCES: WaterSource[] = [
     cacheSeconds: 300,
     reviewedAt: "2026-09-13",
   },
+  {
+    id: "twdb-well-reports",
+    agency: "Texas Water Development Board / Texas Department of Licensing and Regulation",
+    title: "Texas submitted well reports",
+    url: "https://www.twdb.texas.gov/groundwater/data/drillersdb.asp",
+    endpoint:
+      "https://services.twdb.texas.gov/arcgis/rest/services/Public/WellReports/FeatureServer/0/query",
+    terms: "https://www.twdb.texas.gov/policies/site/index.asp",
+    attribution: "TWDB; TDLR Submitted Driller's Report Database",
+    coverage: "Texas; submitted reports from February 2001 forward",
+    license: "PUBLIC_OPEN",
+    enabled: true,
+    exportAllowed: true,
+    cacheSeconds: 300,
+    reviewedAt: "2026-10-13",
+  },
 ];
 
 export const WATER_OPTIONAL_SOURCES = [

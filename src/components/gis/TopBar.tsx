@@ -41,6 +41,7 @@ import { SharePanel } from "./SharePanel";
 import { ProjectAreaControl } from "./ProjectAreaControl";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { LandDraftTools } from "./LandDraftTools";
+import { ButtonHelpSettings } from "@/components/ui/ButtonHelpSettings";
 
 export function TopBar({
   onTogglePanel,
@@ -511,7 +512,7 @@ export function TopBar({
 
       {showAbout && (
         <div className="float-surface absolute right-2 top-14 max-h-[calc(100dvh-4rem)] w-80 overflow-y-auto rounded-2xl p-4 text-xs leading-relaxed">
-          <h2 className="text-sm font-semibold">Help & tours</h2>
+          <h2 className="text-sm font-semibold">Help & settings</h2>
           <p className="mt-1 text-muted-foreground">
             Replay a walkthrough at any time. Tours point to the controls on the real screen.
           </p>
@@ -558,6 +559,10 @@ export function TopBar({
               </span>
             </span>
           </label>
+
+          <div className="mt-3">
+            <ButtonHelpSettings compact />
+          </div>
 
           <button
             onClick={() => {

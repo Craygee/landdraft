@@ -207,10 +207,12 @@ export interface PrintFurniturePosition {
 
 export type PrintFurnitureKey = "legend" | "compass" | "scale" | "attribution";
 
+export type PrintPaper = "letter" | "legal" | "tabloid" | "a5" | "a4" | "a3";
+
 export interface PrintComposition {
   title: string;
   subtitle: string;
-  paper: "letter" | "a4" | "legal";
+  paper: PrintPaper;
   orientation: "landscape" | "portrait";
   showTitle: boolean;
   showLegend: boolean;

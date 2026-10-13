@@ -1,7 +1,7 @@
 import {
   Hexagon,
   Minus,
-  MapPin,
+  MapPinPlus,
   Ruler,
   MousePointer2,
   Move3d,
@@ -31,7 +31,7 @@ const tools: Array<{ mode: DrawMode; label: string; icon: React.ReactNode }> = [
   },
   { mode: "polygon", label: "Draw area", icon: <Hexagon className="size-4" /> },
   { mode: "line", label: "Draw line", icon: <Minus className="size-4" /> },
-  { mode: "point", label: "Drop point", icon: <MapPin className="size-4" /> },
+  { mode: "point", label: "Add marker", icon: <MapPinPlus className="size-4" /> },
   { mode: "note", label: "Drop note marker", icon: <StickyNote className="size-4" /> },
   { mode: "measure-area", label: "Measure area", icon: <Ruler className="size-4" /> },
   { mode: "measure-line", label: "Measure distance", icon: <Move3d className="size-4" /> },
@@ -86,13 +86,15 @@ export function DrawToolbar() {
             aria-label={tool.label}
             aria-pressed={wb.drawMode === tool.mode}
             className={cn(
-              "flex size-9 items-center justify-center rounded-xl transition-colors",
+              "flex h-9 items-center justify-center rounded-xl transition-colors",
+              tool.mode === "point" ? "w-auto gap-1.5 px-2.5" : "w-9",
               wb.drawMode === tool.mode
                 ? "bg-primary text-primary-foreground"
                 : "text-foreground hover:bg-accent hover:text-accent-foreground",
             )}
           >
             {tool.icon}
+            {tool.mode === "point" && <span className="text-[10px] font-semibold">Marker</span>}
           </button>
         ))}
       </div>

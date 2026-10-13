@@ -83,9 +83,14 @@ export function normalizeWaterRecord(
   if (sourceId === "usgs-sites" && (f.geometry?.type !== "Point" || p["agency_code"] !== "USGS"))
     return null;
   const usgs = sourceId === "usgs-sites";
-  const id = text(usgs ? (p["id"] ?? f.id) : p["StateWellNumber"]);
+  const submitted = sourceId === "twdb-well-reports";
+  const id = text(
+    usgs ? (p["id"] ?? f.id) : submitted ? p["WellReportTrackingNumber"] : p["StateWellNumber"],
+  );
   if (!id) return null;
-  const rawDepth = number(usgs ? p["well_constructed_depth"] : p["WellDepth"]);
+  const rawDepth = number(
+    usgs ? p["well_constructed_depth"] : submitted ? p["BoreholeDepthFt"] : p["WellDepth"],
+  );
   const flags = [
     "Source-reported record; not independently verified",
     "Measurement date unknown; not evidence of current conditions",
@@ -96,29 +101,44 @@ export function normalizeWaterRecord(
   if (p["WaterQualityAvailable"] === "Y")
     flags.push("Quality records available at source; chemistry not retrieved");
   if (!usgs && rawDepth !== null)
-    flags.push("TWDB Groundwater Data Viewer identifies WellDepth as feet; source value retained");
+    flags.push(
+      submitted
+        ? "Submitted well report identifies BoreholeDepthFt as feet; source value retained"
+        : "TWDB Groundwater Data Viewer identifies WellDepth as feet; source value retained",
+    );
+  const submittedDate = number(p["DateOfWellCompletion"]);
+  const observationTime =
+    submittedDate !== null && Number.isFinite(submittedDate)
+      ? new Date(submittedDate).toISOString()
+      : null;
   return {
     id: `${sourceId}:${id}`,
     sourceId,
     sourceRecordId: id,
-    name: text(p["monitoring_location_name"]) ?? `TWDB ${id}`,
+    name:
+      text(p["monitoring_location_name"]) ??
+      (submitted ? `Submitted well report ${id}` : `TWDB ${id}`),
     kind: text(usgs ? p["site_type"] : p["WellType"]) ?? "Unknown",
     geometry: { type: "Point", coordinates: [coords[0]!, coords[1]!] },
     classification: "OBSERVED",
     evidence: "Source reported",
-    aquifer: text(usgs ? (p["aquifer_code"] ?? p["national_aquifer_code"]) : p["AquiferCodeName"]),
-    county: text(usgs ? p["county_name"] : p["CountyName"]),
+    aquifer: submitted
+      ? null
+      : text(usgs ? (p["aquifer_code"] ?? p["national_aquifer_code"]) : p["AquiferCodeName"]),
+    county: text(usgs ? p["county_name"] : submitted ? p["County"] : p["CountyName"]),
     state: usgs ? text(p["state_name"]) : "Texas",
     huc: text(p["hydrologic_unit_code"]),
     depth: rawDepth !== null && rawDepth >= 0 ? rawDepth : null,
     depthUnit: rawDepth !== null && rawDepth >= 0 ? "ft" : null,
     verticalDatum: text(p["vertical_datum"]),
     locationAccuracy: text(p["horizontal_positional_accuracy"]),
-    observationTime: null,
+    observationTime,
     retrievedAt,
     sourceUrl: usgs
       ? `https://waterdata.usgs.gov/monitoring-location/${encodeURIComponent(id)}/`
-      : `https://www.twdb.texas.gov/groundwater/data/gwdbrpt.asp`,
+      : submitted
+        ? `https://www3.twdb.texas.gov/apps/WaterDataInteractive/GroundwaterDataViewer/?map=sdr`
+        : `https://www.twdb.texas.gov/groundwater/data/gwdbrpt.asp`,
     raw: p,
     flags,
   };

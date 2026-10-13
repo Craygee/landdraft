@@ -67,7 +67,9 @@ export async function fetchWaterSource(
           outSR: "4326",
           spatialRel: "esriSpatialRelIntersects",
           outFields:
-            "ObjectId,StateWellNumber,PrimaryWaterUse,Elevation,WaterLevelObservationType,WaterQualityAvailable,AquiferCodeName,CountyName,WellType,WellDepth",
+            sourceId === "twdb-well-reports"
+              ? "ObjectId,WellReportTrackingNumber,WellType,ProposedUse,County,DateOfWellCompletion,BoreholeDepthFt,LocationError"
+              : "ObjectId,StateWellNumber,PrimaryWaterUse,Elevation,WaterLevelObservationType,WaterQualityAvailable,AquiferCodeName,CountyName,WellType,WellDepth",
           returnGeometry: "true",
           orderByFields: "ObjectId",
           resultRecordCount: "1000",

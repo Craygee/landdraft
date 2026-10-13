@@ -7,6 +7,7 @@ import { useMapRef } from "@/lib/gis/mapRef";
 import { labelFieldsFromTemplate } from "@/lib/gis/labels";
 import { useWorkbench } from "@/lib/gis/store";
 import { cn } from "@/lib/utils";
+import { defaultMarkerIcon, markerIcons } from "@/lib/gis/markerIcons";
 
 type DestinationMode = "new" | "existing";
 
@@ -46,6 +47,18 @@ export function FeatureDestinationDialog() {
   const [existingLayerId, setExistingLayerId] = useState("");
   const [labelsEnabled, setLabelsEnabled] = useState(false);
   const [labelField, setLabelField] = useState("");
+  const [markerIcon, setMarkerIcon] = useState(defaultMarkerIcon.symbol);
+  const [markerColor, setMarkerColor] = useState("#2f7d4f");
+  const [markerSize, setMarkerSize] = useState(22);
+
+  const pointFeaturesOnly = useMemo(
+    () =>
+      Boolean(
+        pending?.features.length &&
+        pending.features.every((feature) => geometryFamily(feature.geometry) === "point"),
+      ),
+    [pending],
+  );
 
   const compatibleLayers = useMemo(() => {
     if (!pending) return [];
@@ -92,7 +105,29 @@ export function FeatureDestinationDialog() {
       : (labelAttributes[0] ?? "");
     setLabelField(defaultField);
     setLabelsEnabled(Boolean(pending.style?.labelEnabled && defaultField));
-  }, [labelAttributes, pending]);
+    if (pointFeaturesOnly) {
+      const firstProperties = pending.features[0]?.properties ?? {};
+      const featureMarkerColor =
+        typeof firstProperties["MARKER_COLOR"] === "string" && firstProperties["MARKER_COLOR"]
+          ? firstProperties["MARKER_COLOR"]
+          : undefined;
+      const requestedMarkerSize = Number(
+        pending.style?.pointIconSize ?? firstProperties["MARKER_SIZE"] ?? 22,
+      );
+      setMarkerIcon(
+        pending.style?.pointIcon ||
+          String(firstProperties["MARKER_ICON"] ?? "") ||
+          defaultMarkerIcon.symbol,
+      );
+      setMarkerColor(
+        pending.style?.pointIconColor ??
+          featureMarkerColor ??
+          pending.style?.fillColor ??
+          "#2f7d4f",
+      );
+      setMarkerSize(Number.isFinite(requestedMarkerSize) ? requestedMarkerSize : 22);
+    }
+  }, [labelAttributes, pending, pointFeaturesOnly]);
 
   if (!pending) return null;
   const effectiveLayerName = layerName || pending.suggestedLayerName;
@@ -109,19 +144,33 @@ export function FeatureDestinationDialog() {
     setExistingLayerId("");
     setLabelsEnabled(false);
     setLabelField("");
+    setMarkerIcon(defaultMarkerIcon.symbol);
+    setMarkerColor("#2f7d4f");
+    setMarkerSize(22);
   };
 
   const save = () => {
-    const features = pending.features.map((feature, index) =>
-      namedFeature(
+    const features = pending.features.map((feature, index) => {
+      const named = namedFeature(
         feature,
         pending.features.length === 1
           ? effectiveFeatureName
           : pending.separate
             ? String(feature.properties?.["NAME"] ?? `${effectiveLayerName} ${index + 1}`)
             : "",
-      ),
-    );
+      );
+      return pointFeaturesOnly
+        ? {
+            ...named,
+            properties: {
+              ...(named.properties ?? {}),
+              MARKER_ICON: markerIcon,
+              MARKER_COLOR: markerColor,
+              MARKER_SIZE: markerSize,
+            },
+          }
+        : named;
+    });
     if (mode === "existing" && !pending.separate) {
       const target = compatibleLayers.find((layer) => layer.id === existingLayerId);
       if (!target) {
@@ -143,6 +192,14 @@ export function FeatureDestinationDialog() {
     const targetGroupId = newGroupName.trim() ? wb.addGroup(newGroupName.trim()) : effectiveGroupId;
     const style = {
       ...(pending.style ?? {}),
+      ...(pointFeaturesOnly
+        ? {
+            pointIcon: markerIcon,
+            pointIconColor: markerColor,
+            pointIconSize: markerSize,
+            fillColor: markerColor,
+          }
+        : {}),
       labelEnabled: labelsEnabled,
       ...(labelField
         ? {
@@ -235,6 +292,66 @@ export function FeatureDestinationDialog() {
               className="mt-1 w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-foreground outline-none focus:border-primary"
             />
           </label>
+        )}
+
+        {pointFeaturesOnly && (
+          <section className="mt-3 rounded-2xl border border-border bg-secondary/35 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-semibold">Marker symbol</h3>
+                <p className="text-[9px] text-muted-foreground">
+                  Choose how this marker appears on the main map.
+                </p>
+              </div>
+              <span
+                className="flex size-9 items-center justify-center rounded-xl bg-card text-xl shadow-sm"
+                style={{ color: markerColor }}
+                aria-label="Selected marker preview"
+              >
+                {markerIcon}
+              </span>
+            </div>
+            <div className="mt-2 grid grid-cols-6 gap-1.5 sm:grid-cols-8">
+              {markerIcons.map((icon) => (
+                <button
+                  key={icon.id}
+                  type="button"
+                  onClick={() => setMarkerIcon(icon.symbol)}
+                  title={`${icon.label} · ${icon.category}`}
+                  aria-label={`Use ${icon.label} marker`}
+                  aria-pressed={markerIcon === icon.symbol}
+                  className={cn(
+                    "flex aspect-square items-center justify-center rounded-lg border bg-card text-base hover:bg-accent",
+                    markerIcon === icon.symbol
+                      ? "border-primary ring-2 ring-primary/20"
+                      : "border-border",
+                  )}
+                  style={{ color: markerColor }}
+                >
+                  {icon.symbol}
+                </button>
+              ))}
+            </div>
+            <div className="mt-2 grid grid-cols-[auto_1fr_auto] items-center gap-2">
+              <input
+                type="color"
+                value={markerColor}
+                onChange={(event) => setMarkerColor(event.target.value)}
+                aria-label="Marker color"
+                className="h-8 w-10 rounded-lg border border-border bg-card p-1"
+              />
+              <input
+                type="range"
+                min={12}
+                max={48}
+                value={markerSize}
+                onChange={(event) => setMarkerSize(Number(event.target.value))}
+                aria-label="Marker size"
+                className="accent-primary"
+              />
+              <span className="num text-[10px] text-muted-foreground">{markerSize}px</span>
+            </div>
+          </section>
         )}
 
         {mode === "new" || pending.separate ? (

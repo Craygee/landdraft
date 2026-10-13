@@ -20,6 +20,7 @@ import { TourProvider } from "./TourProvider";
 import { SharedLayerPanel } from "./SharedLayerPanel";
 import { ConnectionManager } from "./ConnectionManager";
 import { MapNoteDialog } from "./MapNoteDialog";
+import { FeatureAttributesWindow } from "./FeatureAttributesWindow";
 
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
@@ -85,6 +86,7 @@ function WorkbenchShell() {
 
         <main className="relative min-w-0 flex-1">
           <MapCanvas />
+          <FeatureAttributesWindow />
           {wb.canEditProject && <SelectionToolbar />}
 
           <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col gap-2 p-3">
