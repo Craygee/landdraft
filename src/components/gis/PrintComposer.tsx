@@ -43,42 +43,10 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { createMapSnapshotBlob } from "@/lib/gis/mapPdf";
 import { uploadProjectAsset } from "@/lib/gis/projectRecords";
+import { PRINT_PAPER_OPTIONS, printPageGeometry } from "@/lib/gis/printLayout";
+import { LegendSwatch } from "./LegendSwatch";
 
 const uid = () => window.crypto.randomUUID();
-
-const CSS_PIXELS_PER_INCH = 96;
-
-const printPageGeometry = (
-  paper: PrintComposition["paper"],
-  orientation: PrintComposition["orientation"],
-) => {
-  const portrait =
-    paper === "a4"
-      ? { widthInches: 210 / 25.4, heightInches: 297 / 25.4, label: "A4" }
-      : paper === "legal"
-        ? { widthInches: 8.5, heightInches: 14, label: "Legal" }
-        : { widthInches: 8.5, heightInches: 11, label: "Letter" };
-  const dimensions =
-    orientation === "portrait"
-      ? portrait
-      : {
-          ...portrait,
-          widthInches: portrait.heightInches,
-          heightInches: portrait.widthInches,
-        };
-  const displayDimensions =
-    paper === "a4"
-      ? `${Math.round(dimensions.widthInches * 25.4)} × ${Math.round(dimensions.heightInches * 25.4)} mm`
-      : `${dimensions.widthInches} × ${dimensions.heightInches} in`;
-  return {
-    ...dimensions,
-    widthPixels: dimensions.widthInches * CSS_PIXELS_PER_INCH,
-    heightPixels: dimensions.heightInches * CSS_PIXELS_PER_INCH,
-    cssWidth: `${dimensions.widthInches}in`,
-    cssHeight: `${dimensions.heightInches}in`,
-    displayDimensions,
-  };
-};
 
 const defaultPrintFrame = (
   paper: PrintComposition["paper"],
@@ -774,16 +742,7 @@ export function PrintComposer() {
           <div className="mt-1 space-y-1">
             {legendLayers.map((layer) => (
               <div key={layer.id} className="flex items-center gap-1.5">
-                <span
-                  className="shrink-0 rounded-sm border"
-                  style={{
-                    width: `${Math.max(7, 10 * furnitureScale)}px`,
-                    height: `${Math.max(7, 10 * furnitureScale)}px`,
-                    backgroundColor: layer.style.fillColor,
-                    opacity: Math.max(layer.style.fillOpacity, 0.35),
-                    borderColor: layer.style.strokeColor,
-                  }}
-                />
+                <LegendSwatch layer={layer} scale={furnitureScale} />
                 <span className="truncate">
                   {composition.legendItems[layer.id]?.name || layer.name}
                 </span>
@@ -806,7 +765,11 @@ export function PrintComposer() {
 
   return (
     <div className="app-overlay-viewport print-composer fixed inset-0 z-[100] flex flex-col bg-[#e9e8e2] text-foreground">
-      <style media="print">{`@page { size: ${pageGeometry.cssWidth} ${pageGeometry.cssHeight}; margin: 0; }`}</style>
+      <style media="print">{`
+        @page { size: ${pageGeometry.cssWidth} ${pageGeometry.cssHeight}; margin: 0; }
+        html, body { width: ${pageGeometry.cssWidth} !important; height: ${pageGeometry.cssHeight} !important; margin: 0 !important; padding: 0 !important; }
+        .print-composer { width: ${pageGeometry.cssWidth} !important; height: ${pageGeometry.cssHeight} !important; }
+      `}</style>
       <header className="print-composer-ui flex h-14 shrink-0 items-center gap-2 overflow-x-auto border-b border-border bg-card px-3">
         <button
           onClick={close}
@@ -893,7 +856,7 @@ export function PrintComposer() {
                   frame: defaultPrintFrame(nextPaper, composition.orientation),
                 });
               }}
-              options={["letter", "legal", "a4"]}
+              options={PRINT_PAPER_OPTIONS}
             />
             <Select
               value={composition.orientation}
@@ -955,6 +918,10 @@ export function PrintComposer() {
               {pageGeometry.label} · {pageGeometry.displayDimensions} · {composition.orientation}
             </p>
           </div>
+          <p className="mt-2 text-[10px] leading-snug text-muted-foreground">
+            Output: {pageGeometry.label} · {pageGeometry.displayDimensions}. In the system print
+            dialog, use the same paper size and 100% scale for exact dimensions.
+          </p>
           <Field label="Title" value={composition.title} onChange={(title) => update({ title })} />
           <Field
             label="Subtitle"
@@ -1899,7 +1866,7 @@ function Select({
 }: {
   value: string;
   onChange: (value: string) => void;
-  options: string[];
+  options: Array<string | { value: string; label: string }>;
 }) {
   return (
     <select
@@ -1907,11 +1874,15 @@ function Select({
       onChange={(event) => onChange(event.target.value)}
       className="rounded-lg border border-border bg-card px-2 py-1.5 capitalize"
     >
-      {options.map((option) => (
-        <option key={option} value={option}>
-          {option}
-        </option>
-      ))}
+      {options.map((option) => {
+        const optionValue = typeof option === "string" ? option : option.value;
+        const label = typeof option === "string" ? option : option.label;
+        return (
+          <option key={optionValue} value={optionValue}>
+            {label}
+          </option>
+        );
+      })}
     </select>
   );
 }

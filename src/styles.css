@@ -565,8 +565,12 @@
     margin: 0;
   }
 
+  html,
   body {
+    margin: 0 !important;
+    padding: 0 !important;
     background: white !important;
+    overflow: visible !important;
   }
 
   body * {
@@ -584,9 +588,12 @@
 
   .print-composer {
     position: absolute !important;
-    inset: 0 !important;
+    inset: auto !important;
+    left: 0 !important;
+    top: 0 !important;
     display: block !important;
     background: white !important;
+    overflow: visible !important;
   }
 
   .print-composer > div {
@@ -609,9 +616,13 @@
   .print-composer-page {
     width: var(--print-page-width) !important;
     height: var(--print-page-height) !important;
+    box-sizing: border-box !important;
     transform: none !important;
     box-shadow: none !important;
     break-inside: avoid;
+    page-break-inside: avoid;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
 
   .print-composer-page .maplibregl-ctrl-top-left {

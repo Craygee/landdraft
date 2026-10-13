@@ -1,8 +1,10 @@
 import type { Map as MlMap } from "maplibre-gl";
-import type { GisLayer } from "./types";
+import type { GisLayer, PrintComposition, PrintPaper } from "./types";
 import type { Feature } from "geojson";
+import { legendDashArray, legendSymbolForLayer } from "./legendSymbol";
+import { PRINT_DPI, printPageGeometry } from "./printLayout";
 
-export type MapPaper = "letter" | "a4";
+export type MapPaper = PrintPaper;
 
 export async function createMapSnapshotBlob(
   map: MlMap,
@@ -25,7 +27,13 @@ export async function createMapSnapshotBlob(
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(source, 0, 0);
   const jpeg = await canvasToJpeg(canvas);
-  return buildSingleImagePdf(jpeg, canvas.width, canvas.height);
+  return buildSingleImagePdf(
+    jpeg,
+    canvas.width,
+    canvas.height,
+    (canvas.width / PRINT_DPI) * 72,
+    (canvas.height / PRINT_DPI) * 72,
+  );
 }
 
 export async function exportMapPdf(
@@ -33,8 +41,10 @@ export async function exportMapPdf(
   projectName: string,
   layers: GisLayer[],
   paper: MapPaper = "letter",
+  orientation: PrintComposition["orientation"] = "landscape",
 ) {
-  const page = paper === "a4" ? { width: 1191, height: 842 } : { width: 1100, height: 850 };
+  const geometry = printPageGeometry(paper, orientation);
+  const page = { width: geometry.widthPixels, height: geometry.heightPixels };
   const canvas = document.createElement("canvas");
   canvas.width = page.width;
   canvas.height = page.height;
@@ -73,15 +83,9 @@ export async function exportMapPdf(
   y += 24;
   ctx.font = "12px Arial, sans-serif";
   for (const layer of layers.filter((item) => item.visible).slice(0, 22)) {
-    ctx.fillStyle = layer.style.fillColor;
-    ctx.strokeStyle = layer.style.strokeColor;
-    ctx.globalAlpha = layer.style.fillOpacity;
-    ctx.fillRect(legendX, y - 10, 13, 13);
-    ctx.globalAlpha = layer.style.strokeOpacity;
-    ctx.strokeRect(legendX, y - 10, 13, 13);
-    ctx.globalAlpha = 1;
+    drawLegendSwatch(ctx, layer, legendX, y - 12, 26, 14);
     ctx.fillStyle = "#27332b";
-    ctx.fillText(ellipsize(layer.name, 24), legendX + 21, y);
+    ctx.fillText(ellipsize(layer.name, 22), legendX + 34, y);
     y += 22;
   }
 
@@ -94,11 +98,17 @@ export async function exportMapPdf(
   );
 
   const jpeg = await canvasToJpeg(canvas);
-  const blob = buildSingleImagePdf(jpeg, page.width, page.height);
+  const blob = buildSingleImagePdf(
+    jpeg,
+    page.width,
+    page.height,
+    geometry.widthPoints,
+    geometry.heightPoints,
+  );
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${(projectName || "map").replace(/[^a-z0-9_-]+/gi, "_")}_${paper}.pdf`;
+  link.download = `${(projectName || "map").replace(/[^a-z0-9_-]+/gi, "_")}_${paper}_${orientation}.pdf`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
@@ -200,13 +210,10 @@ export async function exportAnalysisReportPdf(
   let legendX = mapX;
   let legendY = 685;
   for (const layer of layers.filter((item) => item.visible).slice(0, 15)) {
-    ctx.fillStyle = layer.style.fillColor;
-    ctx.globalAlpha = Math.max(0.35, layer.style.fillOpacity);
-    ctx.fillRect(legendX, legendY - 10, 12, 12);
-    ctx.globalAlpha = 1;
+    drawLegendSwatch(ctx, layer, legendX, legendY - 11, 26, 13);
     ctx.fillStyle = "#27332b";
     ctx.font = "11px Arial, sans-serif";
-    ctx.fillText(ellipsize(layer.name, 25), legendX + 18, legendY);
+    ctx.fillText(ellipsize(layer.name, 23), legendX + 32, legendY);
     legendX += 235;
     if (legendX > 700) {
       legendX = mapX;
@@ -223,13 +230,165 @@ export async function exportAnalysisReportPdf(
   );
 
   const jpeg = await canvasToJpeg(canvas);
-  const blob = buildSingleImagePdf(jpeg, page.width, page.height);
+  const blob = buildSingleImagePdf(jpeg, page.width, page.height, 841.89, 595.28);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = `${(options.title || "LandDraft_report").replace(/[^a-z0-9_-]+/gi, "_")}.pdf`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function drawLegendSwatch(
+  ctx: CanvasRenderingContext2D,
+  layer: GisLayer,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  const symbol = legendSymbolForLayer(layer);
+  const centerY = y + height / 2;
+  ctx.save();
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#cbd5e1";
+  ctx.lineWidth = 1;
+  ctx.fillRect(x, y, width, height);
+  ctx.strokeRect(x, y, width, height);
+
+  if (symbol.kind === "point") {
+    if (symbol.markerIcon) {
+      ctx.fillStyle = symbol.markerColor;
+      ctx.globalAlpha = 1;
+      ctx.font = `${Math.max(9, Math.min(14, symbol.markerSize * 0.7))}px Arial, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(symbol.markerIcon, x + width / 2, centerY);
+    } else {
+      const radius = Math.max(3, Math.min(height / 2 - 2, symbol.markerSize / 2));
+      ctx.beginPath();
+      ctx.arc(x + width / 2, centerY, radius, 0, Math.PI * 2);
+      ctx.globalAlpha = Math.max(0.35, symbol.fillOpacity);
+      ctx.fillStyle = symbol.fillColor;
+      ctx.fill();
+      ctx.globalAlpha = symbol.strokeOpacity;
+      ctx.strokeStyle = symbol.strokeColor;
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
+
+  if (symbol.kind === "image") {
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = symbol.fillColor;
+    ctx.fillRect(x + 3, y + 3, width - 6, height - 6);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = symbol.strokeColor;
+    ctx.beginPath();
+    ctx.moveTo(x + 3, y + height - 3);
+    ctx.lineTo(x + width * 0.35, y + height * 0.4);
+    ctx.lineTo(x + width * 0.55, y + height * 0.7);
+    ctx.lineTo(x + width * 0.76, y + height * 0.3);
+    ctx.lineTo(x + width - 3, y + height - 3);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (symbol.kind === "polygon") {
+    const left = x + 3;
+    const top = y + 3;
+    const innerWidth = width - 6;
+    const innerHeight = height - 6;
+    ctx.globalAlpha = Math.max(0.12, symbol.fillOpacity);
+    ctx.fillStyle = symbol.fillColor;
+    ctx.fillRect(left, top, innerWidth, innerHeight);
+    ctx.globalAlpha = symbol.strokeOpacity;
+    ctx.strokeStyle = symbol.strokeColor;
+    ctx.lineWidth = Math.max(1, Math.min(3, symbol.strokeWidth));
+    ctx.setLineDash(legendDashArray(symbol.strokePattern));
+    ctx.strokeRect(left, top, innerWidth, innerHeight);
+    if (symbol.fillPattern !== "solid") {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(left, top, innerWidth, innerHeight);
+      ctx.clip();
+      ctx.globalAlpha = Math.max(0.5, symbol.strokeOpacity);
+      ctx.lineWidth = 0.8;
+      ctx.setLineDash([]);
+      const spacing = 4;
+      if (symbol.fillPattern === "dotted") {
+        ctx.fillStyle = symbol.strokeColor;
+        for (let px = left + 2; px < left + innerWidth; px += spacing)
+          for (let py = top + 2; py < top + innerHeight; py += spacing) {
+            ctx.beginPath();
+            ctx.arc(px, py, 0.7, 0, Math.PI * 2);
+            ctx.fill();
+          }
+      } else {
+        const horizontal =
+          symbol.fillPattern === "horizontal" || symbol.fillPattern === "crosshatch";
+        const vertical = symbol.fillPattern === "vertical" || symbol.fillPattern === "crosshatch";
+        if (horizontal)
+          for (let py = top + 2; py < top + innerHeight; py += spacing) {
+            ctx.beginPath();
+            ctx.moveTo(left, py);
+            ctx.lineTo(left + innerWidth, py);
+            ctx.stroke();
+          }
+        if (vertical)
+          for (let px = left + 2; px < left + innerWidth; px += spacing) {
+            ctx.beginPath();
+            ctx.moveTo(px, top);
+            ctx.lineTo(px, top + innerHeight);
+            ctx.stroke();
+          }
+        if (symbol.fillPattern === "diagonal")
+          for (let offset = -innerHeight; offset < innerWidth; offset += spacing) {
+            ctx.beginPath();
+            ctx.moveTo(left + offset, top + innerHeight);
+            ctx.lineTo(left + offset + innerHeight, top);
+            ctx.stroke();
+          }
+      }
+      ctx.restore();
+    }
+    ctx.restore();
+    return;
+  }
+
+  const lineStart = x + 3;
+  const lineEnd = x + width - 3;
+  if (symbol.kind === "pipeline") {
+    ctx.strokeStyle = "#334155";
+    ctx.lineWidth = Math.max(4.5, symbol.strokeWidth + 2.5);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(lineStart, centerY);
+    ctx.lineTo(lineEnd, centerY);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = symbol.strokeOpacity;
+  ctx.strokeStyle = symbol.strokeColor;
+  ctx.lineWidth = Math.max(1.4, Math.min(5, symbol.strokeWidth));
+  ctx.setLineDash(legendDashArray(symbol.strokePattern));
+  ctx.lineCap = symbol.strokePattern === "dotted" ? "round" : "butt";
+  ctx.beginPath();
+  ctx.moveTo(lineStart, centerY);
+  ctx.lineTo(lineEnd, centerY);
+  ctx.stroke();
+  if (symbol.kind === "pipeline") {
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "#334155";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(x + width / 2, y + 3);
+    ctx.lineTo(x + width / 2, y + height - 3);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawWrappedText(
@@ -269,7 +428,13 @@ async function canvasToJpeg(canvas: HTMLCanvasElement): Promise<Uint8Array> {
 }
 
 /** Minimal standards-compliant one-page PDF containing the composed JPEG map sheet. */
-function buildSingleImagePdf(jpeg: Uint8Array, width: number, height: number): Blob {
+function buildSingleImagePdf(
+  jpeg: Uint8Array,
+  imageWidth: number,
+  imageHeight: number,
+  pageWidth = imageWidth,
+  pageHeight = imageHeight,
+): Blob {
   const encoder = new TextEncoder();
   const chunks: Uint8Array[] = [];
   const offsets: number[] = [0];
@@ -291,15 +456,15 @@ function buildSingleImagePdf(jpeg: Uint8Array, width: number, height: number): B
   object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
   object(
     3,
-    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /XObject << /Map 4 0 R >> >> /Contents 5 0 R >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Map 4 0 R >> >> /Contents 5 0 R >>`,
   );
   offsets[4] = length;
   push(
-    `4 0 obj\n<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`,
+    `4 0 obj\n<< /Type /XObject /Subtype /Image /Width ${imageWidth} /Height ${imageHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`,
   );
   push(jpeg);
   push("\nendstream\nendobj\n");
-  const content = `q ${width} 0 0 ${height} 0 0 cm /Map Do Q`;
+  const content = `q ${pageWidth} 0 0 ${pageHeight} 0 0 cm /Map Do Q`;
   object(5, `<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
   const xref = length;
   push("xref\n0 6\n0000000000 65535 f \n");
