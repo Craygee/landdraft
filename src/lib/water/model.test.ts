@@ -120,6 +120,28 @@ test("TWDB well depth retains the provider's documented feet unit without invent
   assert.equal(r.raw["WellDepth"], 300);
   assert.ok(r.flags.some((f) => f.includes("chemistry not retrieved")));
 });
+
+test("submitted well reports retain completion date, proposed use, and borehole depth", () => {
+  const r = normalizeWaterRecord(
+    "twdb-well-reports",
+    {
+      attributes: {
+        WellReportTrackingNumber: "123456",
+        WellType: "Withdrawal",
+        ProposedUse: "Domestic",
+        County: "Travis",
+        DateOfWellCompletion: Date.parse("2020-04-03T00:00:00Z"),
+        BoreholeDepthFt: 340,
+      },
+      geometry: { x: -97.7, y: 30.2 },
+    },
+    at,
+  )!;
+  assert.equal(r.depth, 340);
+  assert.equal(r.observationTime, "2020-04-03T00:00:00.000Z");
+  assert.equal(r.aquifer, null);
+  assert.equal(r.raw["ProposedUse"], "Domestic");
+});
 test("invalid locations, missing identities and non-USGS records are rejected", () => {
   assert.equal(
     normalizeWaterRecord(

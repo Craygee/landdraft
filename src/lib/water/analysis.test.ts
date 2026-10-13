@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import { bboxPolygon } from "@turf/turf";
 import type { MultiPolygon, Point, Polygon } from "geojson";
 
-import { buildHydrologyProducts, wellDepthBand, wellStyle } from "./analysis.ts";
+import {
+  buildHydrologyProducts,
+  buildWellSiteProfile,
+  wellDepthBand,
+  wellStyle,
+} from "./analysis.ts";
 import type { WaterRecord, WaterSourceId } from "./types.ts";
 
 const retrievedAt = "2026-09-29T12:00:00Z";
@@ -166,4 +171,70 @@ test("well symbols expose explicit category rules for depth, aquifer, and type",
   assert.equal(wellStyle("depth", records).categorized?.field, "depthClass");
   assert.equal(wellStyle("aquifer", records).categorized?.field, "aquifer");
   assert.equal(wellStyle("type", records).categorized?.field, "wellType");
+});
+
+test("each mapped aquifer gets separate depth and real reported-yield screening products", () => {
+  const aquifer = bboxPolygon([-98.7, 29.1, -98.1, 29.7]);
+  const wells = [
+    [-98.6, 29.2, 120, 80],
+    [-98.4, 29.4, 180, 140],
+    [-98.2, 29.6, 260, 220],
+  ].map(([lng, lat, depth, yieldGpm], index) =>
+    record(
+      `yield-${index}`,
+      "twdb-wells",
+      { type: "Point", coordinates: [lng!, lat!] },
+      {
+        aquifer: "Test Aquifer",
+        depth: depth!,
+        depthUnit: "ft",
+        raw: { WellYield: yieldGpm, PrimaryWaterUse: index ? "Irrigation" : "Domestic" },
+      },
+    ),
+  );
+  const result = buildHydrologyProducts(
+    [
+      ...wells,
+      record("extent", "twdb-aquifers", aquifer.geometry, {
+        name: "Test Aquifer",
+        aquifer: "Test Aquifer",
+      }),
+    ],
+    study,
+  );
+  const summary = result.studies.aquifers.find((item) => item.name === "Test Aquifer")!;
+  assert.equal(summary.depthSurfaceStatus, "AVAILABLE");
+  assert.equal(summary.yieldSurfaceStatus, "AVAILABLE");
+  assert.equal(summary.yieldSampleCount, 3);
+  assert.ok(
+    result.layers.some((layer) => layer.name.includes("Test Aquifer · Estimated completion depth")),
+  );
+  assert.ok(
+    result.layers.some((layer) => layer.name.includes("Test Aquifer · Estimated reported yield")),
+  );
+  assert.ok(
+    result.layers.some((layer) => layer.name.includes("Higher anticipated yield evidence")),
+  );
+});
+
+test("well profile never converts absent yield to zero", () => {
+  const aquifer = bboxPolygon([-98.7, 29.1, -98.1, 29.7]);
+  const records = [
+    record("extent", "twdb-aquifers", aquifer.geometry, {
+      name: "Test Aquifer",
+      aquifer: "Test Aquifer",
+    }),
+    ...[100, 150, 220].map((depth, index) =>
+      record(
+        `well-${index}`,
+        "twdb-wells",
+        { type: "Point", coordinates: [-98.5 + index * 0.05, 29.35 + index * 0.05] },
+        { aquifer: "Test Aquifer", depth, depthUnit: "ft", raw: { PrimaryWaterUse: "Domestic" } },
+      ),
+    ),
+  ];
+  const profile = buildWellSiteProfile(records, [-98.45, 29.4]);
+  assert.equal(profile.aquifers[0]?.estimatedCompletionDepthFt !== null, true);
+  assert.equal(profile.aquifers[0]?.estimatedYieldGpm, null);
+  assert.equal(profile.aquifers[0]?.yieldSampleCount, 0);
 });

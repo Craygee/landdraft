@@ -67,7 +67,9 @@ export async function fetchWaterSource(
           outSR: "4326",
           spatialRel: "esriSpatialRelIntersects",
           outFields:
-            "ObjectId,StateWellNumber,PrimaryWaterUse,Elevation,WaterLevelObservationType,WaterQualityAvailable,AquiferCodeName,CountyName,WellType,WellDepth",
+            sourceId === "twdb-well-reports"
+              ? "ObjectId,WellReportTrackingNumber,WellType,ProposedUse,County,DateOfWellCompletion,BoreholeDepthFt,LocationError"
+              : "ObjectId,StateWellNumber,PrimaryWaterUse,Elevation,WaterLevelObservationType,WaterQualityAvailable,AquiferCodeName,CountyName,WellType,WellDepth",
           returnGeometry: "true",
           orderByFields: "ObjectId",
           resultRecordCount: "1000",
@@ -77,9 +79,7 @@ export async function fetchWaterSource(
         url.searchParams.set("f", "geojson");
         url.searchParams.set(
           "outFields",
-          sourceId === "twdb-aquifers"
-            ? "OBJECTID,AQUIFER,AQ_NAME"
-            : "OBJECTID,AQUIFER,AQU_NAME",
+          sourceId === "twdb-aquifers" ? "OBJECTID,AQUIFER,AQ_NAME" : "OBJECTID,AQUIFER,AQU_NAME",
         );
         url.searchParams.set("orderByFields", "OBJECTID");
         url.searchParams.set("maxAllowableOffset", "0.001");

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { area as turfArea, bbox, bboxPolygon } from "@turf/turf";
+import { area as turfArea, bbox, bboxPolygon, point } from "@turf/turf";
 import {
   ArrowLeft,
   Droplets,
@@ -9,6 +9,9 @@ import {
   Download,
   Layers3,
   ExternalLink,
+  GripHorizontal,
+  MapPinPlus,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { MapCanvas } from "@/components/gis/MapCanvas";
@@ -21,7 +24,7 @@ import { importFile } from "@/lib/gis/import";
 import { getCloudSession } from "@/lib/cloud";
 import { analyzeWaterSource } from "@/lib/water/api";
 import { measurementAge, validateWaterArea, waterCsv } from "@/lib/water/model";
-import { buildHydrologyProducts, wellStyle } from "@/lib/water/analysis";
+import { buildHydrologyProducts, buildWellSiteProfile, wellStyle } from "@/lib/water/analysis";
 import { WATER_OPTIONAL_SOURCES, WATER_SOURCES } from "@/lib/water/registry";
 import { defaultStyle } from "@/lib/gis/types";
 import {
@@ -30,6 +33,7 @@ import {
   type WaterArea,
   type WaterRecord,
   type WaterSourceResult,
+  type WellSiteProfile,
   type WellColorMode,
 } from "@/lib/water/types";
 
@@ -119,6 +123,17 @@ export function WaterWorkspace() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [wellColorMode, setWellColorMode] = useState<WellColorMode>("depth");
+  const [selectedAquifer, setSelectedAquifer] = useState<string>("");
+  const [profileMode, setProfileMode] = useState(false);
+  const [wellProfile, setWellProfile] = useState<WellSiteProfile | null>(null);
+  const [panelPosition, setPanelPosition] = useState<{ left: number; top: number } | null>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const panelDrag = useRef<{
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
   const run = useRef(0);
   const upload = useRef<HTMLInputElement>(null);
   useEffect(
@@ -127,6 +142,35 @@ export function WaterWorkspace() {
     },
     [],
   );
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      const drag = panelDrag.current;
+      const frame = mainRef.current?.getBoundingClientRect();
+      const floating = panelRef.current?.getBoundingClientRect();
+      if (!drag || !frame || !floating || event.pointerId !== drag.pointerId) return;
+      setPanelPosition({
+        left: Math.max(
+          8,
+          Math.min(frame.width - floating.width - 8, event.clientX - frame.left - drag.offsetX),
+        ),
+        top: Math.max(
+          8,
+          Math.min(frame.height - floating.height - 8, event.clientY - frame.top - drag.offsetY),
+        ),
+      });
+    };
+    const finish = (event: PointerEvent) => {
+      if (panelDrag.current?.pointerId === event.pointerId) panelDrag.current = null;
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+    };
+  }, []);
   const state = wb.waterWorkspace;
   const study = state?.area;
   const results = progress ?? state?.analysis?.results ?? [];
@@ -144,6 +188,62 @@ export function WaterWorkspace() {
   const record = records.find(
     (r) => r.id === (selectedMapFeature?.properties?.["waterRecordId"] ?? selected),
   );
+  useEffect(() => {
+    if (!map || !profileMode) return;
+    const place = (event: { lngLat: { lng: number; lat: number } }) => {
+      const coordinate: [number, number] = [event.lngLat.lng, event.lngLat.lat];
+      const profile = buildWellSiteProfile(records, coordinate);
+      setWellProfile(profile);
+      setProfileMode(false);
+      setPanel(true);
+      setTab("Hydrology");
+      const groupId =
+        wb.groups.find((group) => group.name === "Water & Hydrogeology")?.id ??
+        wb.addGroup("Water & Hydrogeology");
+      const name = `${HYDROLOGY_LAYER_PREFIX} Proposed well profile`;
+      const data = {
+        type: "FeatureCollection" as const,
+        features: [
+          point(coordinate, {
+            NAME: "Proposed well profile",
+            classification: "LANDDRAFT-DERIVED",
+            aquiferCount: profile.aquifers.length,
+            analysisMethod: `Nearby well evidence within ${profile.searchRadiusMiles} miles`,
+          }),
+        ],
+      };
+      const existing = wb.layers.find((layer) => layer.name === name);
+      if (existing) wb.updateLayer(existing.id, { data, visible: true });
+      else
+        wb.addLayer({
+          name,
+          groupId,
+          data,
+          source: {
+            kind: "derived",
+            sourceLayerId: "water-analysis",
+            query: profile.limitation,
+            cachedAt: profile.generatedAt,
+          },
+          style: {
+            ...defaultStyle(6),
+            fillColor: "#0ea5e9",
+            strokeColor: "#082f49",
+            strokeWidth: 2,
+            pointSize: 10,
+            pointIcon: "◉",
+            pointIconColor: "#0ea5e9",
+            pointIconSize: 24,
+          },
+        });
+    };
+    map.getCanvas().style.cursor = "crosshair";
+    map.once("click", place);
+    return () => {
+      map.off("click", place);
+      map.getCanvas().style.cursor = "";
+    };
+  }, [map, profileMode, records, wb]);
   const polygons = useMemo(
     () =>
       wb.layers.flatMap((l) =>
@@ -334,15 +434,18 @@ export function WaterWorkspace() {
       wellColorMode,
     );
     for (const product of hydrology.layers) {
+      const aquiferProduct = product.data.features.some(
+        (feature) => typeof feature.properties?.["aquifer"] === "string",
+      );
       const existing = wb.layers.find((layer) => layer.name === product.name);
       if (existing)
         wb.updateLayer(existing.id, {
           data: product.data,
           style: product.style,
-          visible: true,
+          visible: !aquiferProduct,
         });
-      else
-        wb.addLayer({
+      else {
+        const addedId = wb.addLayer({
           name: product.name,
           groupId,
           data: product.data,
@@ -354,6 +457,8 @@ export function WaterWorkspace() {
           },
           style: product.style,
         });
+        if (aquiferProduct) wb.updateLayer(addedId.id, { visible: false });
+      }
     }
     const analysis: WaterAnalysis = {
       id: crypto.randomUUID(),
@@ -364,6 +469,7 @@ export function WaterWorkspace() {
       studies: hydrology.studies,
     };
     wb.setWaterWorkspace({ version: 1, enabled: true, area: study, analysis });
+    setSelectedAquifer(hydrology.studies.aquifers[0]?.name ?? "");
     setBusy(false);
   }
   function changeWellColorMode(mode: WellColorMode) {
@@ -411,6 +517,31 @@ export function WaterWorkspace() {
     toast.success(`${reference.name} added`, {
       description: `Loads for the visible map at zoom ${reference.minZoom} or closer.`,
     });
+  }
+  function showAquiferProducts(name: string) {
+    setSelectedAquifer(name);
+    const aquiferNames = state?.analysis?.studies?.aquifers.map((item) => item.name) ?? [];
+    for (const layer of wb.layers) {
+      const owner = aquiferNames.find((aquifer) =>
+        layer.name.startsWith(`${HYDROLOGY_LAYER_PREFIX} ${aquifer} ·`),
+      );
+      if (owner) wb.updateLayer(layer.id, { visible: owner === name });
+    }
+    const extent = records.find(
+      (item) =>
+        (item.sourceId === "twdb-aquifers" || item.sourceId === "twdb-minor-aquifers") &&
+        (item.name === name || item.aquifer === name),
+    );
+    if (extent && extent.geometry.type !== "Point" && map) {
+      const bounds = bbox({ type: "Feature", properties: {}, geometry: extent.geometry });
+      map.fitBounds(
+        [
+          [bounds[0]!, bounds[1]!],
+          [bounds[2]!, bounds[3]!],
+        ],
+        { padding: 70, maxZoom: 11 },
+      );
+    }
   }
   function inspect(r: WaterRecord) {
     setSelected(r.id);
@@ -498,7 +629,7 @@ export function WaterWorkspace() {
           <Save className="inline size-4" /> Save
         </button>
       </header>
-      <main className="relative min-h-0 flex-1">
+      <main ref={mainRef} className="relative min-h-0 flex-1 overflow-hidden">
         <MapCanvas />
         <FeatureDestinationDialog />
         {printOpen && (
@@ -506,17 +637,68 @@ export function WaterWorkspace() {
             <PrintComposer />
           </Suspense>
         )}
-        <div className="absolute right-12 top-3 z-10 max-w-[50%]">
+        <div
+          className={`absolute right-12 top-3 z-10 max-w-[72%] md:max-w-[42%] ${panel && !panelPosition ? "md:left-[384px]" : ""}`}
+        >
           <SearchBox />
         </div>
         <div className="absolute bottom-8 right-3 z-10">
           <BasemapControl />
         </div>
+        {profileMode && (
+          <div className="absolute left-1/2 top-3 z-40 flex max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-2 rounded-xl border-2 border-sky-600 bg-background px-3 py-2 text-sm shadow-xl">
+            <MapPinPlus className="size-4 shrink-0 text-sky-700" />
+            <span>Tap the proposed well location.</span>
+            <button
+              type="button"
+              className="rounded-lg p-2 hover:bg-secondary"
+              aria-label="Cancel well-profile marker"
+              onClick={() => setProfileMode(false)}
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+        )}
         {panel && (
           <aside
+            ref={panelRef}
             aria-label="Water tools"
-            className="absolute inset-x-2 bottom-3 z-20 max-h-[52%] overflow-auto rounded-2xl border bg-background/95 p-4 shadow-xl backdrop-blur md:inset-x-auto md:bottom-3 md:left-3 md:top-3 md:max-h-none md:w-[360px]"
+            style={panelPosition ?? undefined}
+            className={`absolute inset-x-2 bottom-3 z-30 max-h-[58%] overflow-auto rounded-2xl border bg-background/95 p-4 shadow-xl backdrop-blur md:bottom-auto md:max-h-[calc(100%-24px)] md:w-[360px] ${panelPosition ? "md:inset-auto" : "md:inset-x-auto md:left-3 md:top-3"}`}
           >
+            <div className="sticky -top-4 z-10 -mx-4 -mt-4 mb-3 hidden items-center justify-between border-b bg-background/95 px-3 py-1.5 backdrop-blur md:flex">
+              <button
+                type="button"
+                className="flex min-h-10 flex-1 touch-none cursor-grab items-center justify-center gap-2 rounded-lg text-xs text-muted-foreground hover:bg-secondary active:cursor-grabbing"
+                aria-label="Move water tools panel"
+                onPointerDown={(event) => {
+                  const frame = mainRef.current?.getBoundingClientRect();
+                  const floating = panelRef.current?.getBoundingClientRect();
+                  if (!frame || !floating) return;
+                  panelDrag.current = {
+                    pointerId: event.pointerId,
+                    offsetX: event.clientX - floating.left,
+                    offsetY: event.clientY - floating.top,
+                  };
+                  setPanelPosition({
+                    left: floating.left - frame.left,
+                    top: floating.top - frame.top,
+                  });
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                }}
+              >
+                <GripHorizontal className="size-4" /> Move panel
+              </button>
+              {panelPosition && (
+                <button
+                  type="button"
+                  className="min-h-10 rounded-lg px-2 text-xs hover:bg-secondary"
+                  onClick={() => setPanelPosition(null)}
+                >
+                  Reset
+                </button>
+              )}
+            </div>
             {!state?.enabled ? (
               <>
                 <h2 className="font-semibold">Draw an area. Investigate its water.</h2>
@@ -707,6 +889,64 @@ export function WaterWorkspace() {
                       </div>
                     </section>
 
+                    <section className="rounded-xl border border-sky-600/40 bg-sky-50/50 p-3 text-xs dark:bg-sky-950/20">
+                      <div className="flex items-start gap-2">
+                        <MapPinPlus className="mt-0.5 size-4 shrink-0 text-sky-700" />
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-semibold">Proposed well depth profile</h3>
+                          <p className="mt-1 text-muted-foreground">
+                            Drop a marker to compare mapped aquifers with nearby completed-well
+                            depths, reported uses, completion dates, and any real yield evidence.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className={`${button} mt-2 w-full bg-background`}
+                        disabled={!records.length}
+                        onClick={() => {
+                          setProfileMode(true);
+                          setPanel(false);
+                        }}
+                      >
+                        <MapPinPlus className="mr-1 inline size-4" /> Drop well marker
+                      </button>
+                      {wellProfile && <WellProfileGraphic profile={wellProfile} />}
+                    </section>
+
+                    {state?.analysis?.studies?.aquifers.length ? (
+                      <section className="rounded-xl border p-3 text-xs">
+                        <h3 className="font-semibold">Select an aquifer map</h3>
+                        <p className="mt-1 text-muted-foreground">
+                          Shows that aquifer's LandDraft depth surface and reported-yield evidence
+                          layers when enough real source observations exist.
+                        </p>
+                        <select
+                          value={selectedAquifer}
+                          onChange={(event) => showAquiferProducts(event.target.value)}
+                          className="mt-2 min-h-11 w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                        >
+                          <option value="" disabled>
+                            Choose aquifer
+                          </option>
+                          {state.analysis.studies.aquifers.map((aquifer) => (
+                            <option key={aquifer.name} value={aquifer.name}>
+                              {aquifer.name}
+                            </option>
+                          ))}
+                        </select>
+                        {selectedAquifer && (
+                          <button
+                            type="button"
+                            className={`${button} mt-2 w-full`}
+                            onClick={() => showAquiferProducts(selectedAquifer)}
+                          >
+                            Show selected aquifer layers
+                          </button>
+                        )}
+                      </section>
+                    ) : null}
+
                     <label className="block text-xs font-semibold">
                       Color the combined well layer by
                       <select
@@ -800,6 +1040,36 @@ export function WaterWorkspace() {
                                     ? " · depth unavailable"
                                     : ` · median well depth ${aquifer.medianDepthFt.toFixed(0)} ft`}
                                 </p>
+                                <p className="mt-1">
+                                  Depth surface:{" "}
+                                  {(aquifer.depthSurfaceStatus ?? "INSUFFICIENT_DATA").replaceAll(
+                                    "_",
+                                    " ",
+                                  )}
+                                  {" · "}Yield evidence:{" "}
+                                  {(aquifer.yieldSurfaceStatus ?? "INSUFFICIENT_DATA").replaceAll(
+                                    "_",
+                                    " ",
+                                  )}
+                                  {(aquifer.yieldSampleCount ?? 0)
+                                    ? ` (${aquifer.yieldSampleCount} reported values)`
+                                    : " (no reported GPM values)"}
+                                </p>
+                                {Object.keys(aquifer.reportedUses ?? {}).length > 0 && (
+                                  <p className="mt-1 text-muted-foreground">
+                                    Reported uses:{" "}
+                                    {Object.entries(aquifer.reportedUses ?? {})
+                                      .slice(0, 4)
+                                      .map(([use, count]) => `${use} ${count}`)
+                                      .join(" · ")}
+                                  </p>
+                                )}
+                                {aquifer.earliestCompletionYear && aquifer.latestCompletionYear && (
+                                  <p className="mt-1 text-muted-foreground">
+                                    Retrieved completion history: {aquifer.earliestCompletionYear}–
+                                    {aquifer.latestCompletionYear}
+                                  </p>
+                                )}
                                 <p className="mt-1 text-[10px] font-semibold text-amber-700">
                                   Storage volume: unavailable
                                 </p>
@@ -1066,6 +1336,121 @@ export function WaterWorkspace() {
     </div>
   );
 }
+
+function WellProfileGraphic({ profile }: { profile: WellSiteProfile }) {
+  const usable = profile.aquifers
+    .filter((aquifer) => aquifer.estimatedCompletionDepthFt !== null)
+    .slice(0, 8);
+  const maxDepth = Math.max(
+    100,
+    ...usable.map(
+      (aquifer) => aquifer.maximumCompletionDepthFt ?? aquifer.estimatedCompletionDepthFt ?? 0,
+    ),
+  );
+  return (
+    <div className="mt-3 rounded-lg border bg-background p-2">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <strong>Point profile</strong>
+          <p className="text-[10px] text-muted-foreground">
+            {profile.coordinate[1].toFixed(5)}, {profile.coordinate[0].toFixed(5)} · nearby evidence
+            within {profile.searchRadiusMiles} mi
+          </p>
+        </div>
+        <span className="rounded-full bg-sky-100 px-2 py-1 text-[9px] font-semibold text-sky-800">
+          LANDDRAFT SCREENING
+        </span>
+      </div>
+      {usable.length ? (
+        <div className="mt-3 overflow-x-auto">
+          <div className="relative h-72 min-w-[290px] border-l-2 border-slate-700 pl-12">
+            {[0, 0.25, 0.5, 0.75, 1].map((ratio) => (
+              <div
+                key={ratio}
+                className="absolute left-0 right-0 border-t border-dashed border-slate-300"
+                style={{ top: `${ratio * 100}%` }}
+              >
+                <span className="absolute -left-1 -translate-x-full -translate-y-1/2 text-[9px] text-muted-foreground">
+                  {(maxDepth * ratio).toFixed(0)} ft
+                </span>
+              </div>
+            ))}
+            {usable.map((aquifer, index) => {
+              const estimate = aquifer.estimatedCompletionDepthFt!;
+              const top = Math.min(96, Math.max(1, (estimate / maxDepth) * 100));
+              return (
+                <div
+                  key={aquifer.name}
+                  className="absolute left-2 right-1 flex -translate-y-1/2 items-center gap-2"
+                  style={{ top: `${top}%` }}
+                >
+                  <span
+                    className="size-3 shrink-0 rounded-full border-2 border-white shadow"
+                    style={{ background: palettesForProfile[index % palettesForProfile.length] }}
+                  />
+                  <span className="min-w-0 rounded-md bg-background/95 px-1.5 py-1 shadow-sm">
+                    <strong className="block truncate">{aquifer.name}</strong>
+                    <span className="block text-[9px] text-muted-foreground">
+                      estimated completion {estimate.toFixed(0)} ft · {aquifer.depthSampleCount}{" "}
+                      depth samples · {aquifer.confidence.toLowerCase()} confidence
+                    </span>
+                    <span className="block text-[9px]">
+                      {aquifer.estimatedYieldGpm === null
+                        ? "Reported yield: insufficient data"
+                        : `Estimated from reported tests: ${aquifer.estimatedYieldGpm.toFixed(0)} gpm`}
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <p className="mt-2 rounded-lg bg-amber-50 p-2 text-amber-900">
+          No aquifer has three nearby completed-depth records at this point. Missing values were not
+          converted to zero.
+        </p>
+      )}
+      <div className="mt-2 space-y-1">
+        {profile.aquifers.slice(0, 8).map((aquifer) => (
+          <details key={aquifer.name} className="rounded-lg bg-secondary px-2">
+            <summary className="min-h-10 cursor-pointer py-2 font-semibold">
+              {aquifer.name} · {aquifer.extentType.replaceAll("-", " ")}
+            </summary>
+            <p>
+              Completion-depth evidence: {aquifer.depthSampleCount} samples
+              {aquifer.minimumCompletionDepthFt === null
+                ? ""
+                : ` · observed range ${aquifer.minimumCompletionDepthFt.toFixed(0)}–${aquifer.maximumCompletionDepthFt?.toFixed(0)} ft`}
+            </p>
+            <p>
+              Nearest retrieved well: {aquifer.nearestWellMiles?.toFixed(1) ?? "unknown"} mi · yield
+              samples: {aquifer.yieldSampleCount}
+            </p>
+            {aquifer.earliestCompletionYear && aquifer.latestCompletionYear && (
+              <p>
+                Retrieved completion history: {aquifer.earliestCompletionYear}–
+                {aquifer.latestCompletionYear}
+              </p>
+            )}
+            {Object.keys(aquifer.nearbyReportedUses).length > 0 && (
+              <p>
+                Nearby reported uses:{" "}
+                {Object.entries(aquifer.nearbyReportedUses)
+                  .map(([use, count]) => `${use} ${count}`)
+                  .join(" · ")}
+              </p>
+            )}
+            <p className="pb-2 text-[10px] text-muted-foreground">{aquifer.limitation}</p>
+          </details>
+        ))}
+      </div>
+      <p className="mt-2 text-[10px] text-muted-foreground">{profile.limitation}</p>
+    </div>
+  );
+}
+
+const palettesForProfile = ["#0284c7", "#7c3aed", "#16a34a", "#ea580c", "#be123c", "#0891b2"];
 
 function RecordCard({ record: r }: { record: WaterRecord }) {
   return (
