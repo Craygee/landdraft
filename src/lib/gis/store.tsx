@@ -385,6 +385,10 @@ export interface WorkbenchApi extends WorkbenchState {
     index: number,
     properties: Record<string, unknown>,
   ) => void;
+  updateFeaturesProperties: (
+    layerId: string,
+    updates: Array<{ index: number; properties: Record<string, unknown> }>,
+  ) => void;
   updateFeatureGeometry: (layerId: string, index: number, geometry: Geometry) => void;
   removeFeatures: (layerId: string, indexes: number[]) => void;
   setAssistantConversation: (conversation: AssistantConversation) => void;
@@ -1186,6 +1190,32 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const updateFeaturesProperties = useCallback<WorkbenchApi["updateFeaturesProperties"]>(
+    (layerId, updates) => {
+      if (updates.length === 0) return;
+      const updatesByIndex = new Map(updates.map((update) => [update.index, update.properties]));
+      setState((s) => ({
+        ...s,
+        layers: s.layers.map((layer) => {
+          if (layer.id !== layerId) return layer;
+          return {
+            ...layer,
+            data: {
+              type: "FeatureCollection",
+              features: layer.data.features.map((feature, featureIndex) => {
+                const properties = updatesByIndex.get(featureIndex);
+                return properties
+                  ? { ...feature, properties: { ...(feature.properties ?? {}), ...properties } }
+                  : feature;
+              }),
+            },
+          };
+        }),
+      }));
+    },
+    [],
+  );
+
   const updateFeatureGeometry = useCallback<WorkbenchApi["updateFeatureGeometry"]>(
     (layerId, index, geometry) => {
       setState((s) => ({
@@ -1916,6 +1946,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       setProjectName: (name) => patch({ projectName: name }),
       appendFeature,
       updateFeatureProperties,
+      updateFeaturesProperties,
       updateFeatureGeometry,
       removeFeatures,
       setAssistantConversation,
@@ -1978,6 +2009,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       toggleLayerSelection,
       appendFeature,
       updateFeatureProperties,
+      updateFeaturesProperties,
       updateFeatureGeometry,
       removeFeatures,
       setAssistantConversation,
