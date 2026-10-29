@@ -190,3 +190,30 @@ test("the terrain API normalizes the official USGS EPQS response", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("EPQS null, blank and boolean values remain missing while real zero stays valid", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const [index, value] of [null, "", true, 0, -12.5, -1000000].entries()) {
+      globalThis.fetch = async () => Response.json({ value, resolution: null });
+      const longitude = -109 + index * 0.01;
+      const result = await handlePipelineElevationRequest(
+        new Request("https://landdraft.test/api/pipeline/elevation", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            points: [
+              { stationM: 0, longitude, latitude: 38 },
+              { stationM: 10, longitude: longitude + 0.0001, latitude: 38 },
+            ],
+          }),
+        }),
+      );
+      const payload = await result!.json();
+      assert.equal(payload.points[0].elevationM, index === 3 ? 0 : index === 4 ? -12.5 : null);
+      assert.equal(payload.points[0].resolutionM, undefined);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -1,3 +1,5 @@
+import { syncMapLayers } from "@/lib/gis/syncMapLayers";
+import { createPortal } from "react-dom";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Map as MlMap,
@@ -38,6 +40,7 @@ import { useMapRef } from "@/lib/gis/mapRef";
 import { getBasemapStyle } from "@/lib/gis/basemaps";
 import {
   buildLayerSpecs,
+  primaryLabelGeometry,
   sourceId,
   allLayerIds,
   fillId,
@@ -48,6 +51,7 @@ import {
   pointId,
 } from "@/lib/gis/mapStyle";
 import { composeLabel } from "@/lib/gis/labels";
+import { buildParcelLabels, isParcelLayer, parcelLabelSourceId } from "@/lib/gis/parcelDisplay";
 import type { GisLayer } from "@/lib/gis/types";
 import {
   formatArea,
@@ -87,6 +91,7 @@ interface PreparedCacheEntry {
   data: FeatureCollection;
   labelKey: string;
   fc: FeatureCollection;
+  labelFc: FeatureCollection | null;
 }
 
 type VertexEditMode = "move" | "add" | "delete";
@@ -129,6 +134,11 @@ const selectableLayerIds = (layerId: string) => [
 ];
 
 export function MapCanvas() {
+  const [overlap, setOverlap] = useState<{
+    options: Array<{ layerId: string; index: number }>;
+    base: Array<{ layerId: string; index: number }>;
+    additive: boolean;
+  } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const mapObj = useRef<MlMap | null>(null);
   const wb = useWorkbench();
@@ -136,6 +146,9 @@ export function MapCanvas() {
   wbRef.current = wb;
   const {
     setMap,
+    elevationProfileOpen,
+    buildableAreaOpen,
+    setLayerRenderErrors,
     setDrawerOpen,
     setPendingCatalogQuery,
     setLastPoint,
@@ -147,6 +160,8 @@ export function MapCanvas() {
     setEditEnabled,
   } = useMapRef();
 
+  const elevationProfileOpenRef = useRef(elevationProfileOpen);
+  elevationProfileOpenRef.current = elevationProfileOpen || buildableAreaOpen;
   const [cursor, setCursor] = useState<{ lng: number; lat: number } | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [draft, setDraft] = useState<Position[]>([]);
@@ -170,6 +185,7 @@ export function MapCanvas() {
   const sourcePayloadRef = useRef(new Map<string, FeatureCollection>());
   const styleSignatureRef = useRef(new Map<string, string>());
   const orderSignatureRef = useRef("");
+  const renderErrorSignatureRef = useRef("");
   const selectedStateRef = useRef(new Map<string, Set<number>>());
   const appliedProjectRef = useRef("");
   const fittedShareRef = useRef("");
@@ -356,27 +372,41 @@ export function MapCanvas() {
     const ordered = wb.displayLayers;
     const nextCache = new Map<string, PreparedCacheEntry>();
     const result = ordered.map((layer) => {
-      const labelKey = layer.style.labelTemplate;
+      const rawLabelKey = layer.style.labelUseLayerName
+        ? "layer-name:" + layer.name
+        : layer.style.labelTemplate;
+      const labelKey = isParcelLayer(layer)
+        ? rawLabelKey +
+          JSON.stringify([
+            layer.style.labelSize,
+            layer.style.labelScaleWithZoom,
+            layer.style.labelLineSpacing,
+            layer.style.labelHaloWidth,
+          ])
+        : rawLabelKey;
       const cached = preparedCacheRef.current.get(layer.id);
       if (cached && cached.data === layer.data && cached.labelKey === labelKey) {
         nextCache.set(layer.id, cached);
-        return { layer, fc: cached.fc };
+        return { layer, fc: cached.fc, labelFc: cached.labelFc };
       }
-      if (!labelKey.trim()) {
-        const cachedWithoutLabels = { data: layer.data, labelKey, fc: layer.data };
+      if (!rawLabelKey.trim()) {
+        const cachedWithoutLabels = { data: layer.data, labelKey, fc: layer.data, labelFc: null };
         nextCache.set(layer.id, cachedWithoutLabels);
-        return { layer, fc: layer.data };
+        return { layer, fc: layer.data, labelFc: null };
       }
       const features: Feature[] = layer.data.features.map((f) => ({
         ...f,
         properties: {
           ...(f.properties ?? {}),
-          __label: composeLabel(f as never, layer.style.labelTemplate),
+          __label: layer.style.labelUseLayerName
+            ? layer.name
+            : composeLabel(f as never, layer.style.labelTemplate),
         },
       }));
       const fc = { type: "FeatureCollection", features } as FeatureCollection;
-      nextCache.set(layer.id, { data: layer.data, labelKey, fc });
-      return { layer, fc };
+      const labelFc = isParcelLayer(layer) ? buildParcelLabels(layer, fc) : null;
+      nextCache.set(layer.id, { data: layer.data, labelKey, fc, labelFc });
+      return { layer, fc, labelFc };
     });
     preparedCacheRef.current = nextCache;
     return result;
@@ -393,7 +423,12 @@ export function MapCanvas() {
     const sync = () => {
       if (cancelled) return;
       try {
-        const keep = new Set(prepared.map((p) => sourceId(p.layer.id)));
+        const keep = new Set(
+          prepared.flatMap((p) => [
+            sourceId(p.layer.id),
+            ...(p.labelFc ? [parcelLabelSourceId(p.layer.id)] : []),
+          ]),
+        );
         let rebuiltLayers = false;
         for (const spec of map.getStyle().layers ?? []) {
           const sid = (spec as { source?: string }).source;
@@ -407,10 +442,20 @@ export function MapCanvas() {
           }
         }
 
-        for (const { layer, fc } of prepared) {
+        const syncErrors = syncMapLayers(prepared, ({ layer, fc, labelFc }) => {
           const sid = sourceId(layer.id);
+          if (labelFc) {
+            const labelSid = parcelLabelSourceId(layer.id);
+            const labelSource = map.getSource(labelSid) as GeoJSONSource | undefined;
+            if (!labelSource) map.addSource(labelSid, { type: "geojson", data: labelFc });
+            else if (sourcePayloadRef.current.get(labelSid) !== labelFc)
+              labelSource.setData(labelFc);
+            sourcePayloadRef.current.set(labelSid, labelFc);
+          }
           const styleSignature = JSON.stringify([
             layer.style,
+            layer.style.labelUseLayerName ? layer.name : null,
+            primaryLabelGeometry(layer),
             layer.source.kind === "remote" ? layer.source.minZoom : null,
             layer.source.kind === "image" ? [layer.source.dataUrl, layer.source.coordinates] : null,
           ]);
@@ -460,7 +505,13 @@ export function MapCanvas() {
           for (const id of allLayerIds(layer.id))
             if (map.getLayer(id))
               map.setLayoutProperty(id, "visibility", layer.visible ? "visible" : "none");
+        });
+        const renderErrorSignature = JSON.stringify(syncErrors);
+        if (renderErrorSignatureRef.current !== renderErrorSignature) {
+          renderErrorSignatureRef.current = renderErrorSignature;
+          setLayerRenderErrors(syncErrors);
         }
+        for (const id of Object.keys(syncErrors)) styleSignatureRef.current.delete(id);
 
         // Reorder: first item in the composed project/subproject stack is topmost.
         const orderSignature = prepared.map(({ layer }) => layer.id).join("|");
@@ -470,10 +521,25 @@ export function MapCanvas() {
               if (map.getLayer(id)) map.moveLayer(id);
             }
           }
+          // Labels must remain above all fills, not just their own layer's fill.
+          const labelOrder = [...prepared].reverse();
+          // Layer-name labels are explicit annotations and get placement priority
+          // over ordinary attribute labels, while still respecting collision settings.
+          labelOrder.sort(
+            (a, b) =>
+              Number(Boolean(a.layer.style.labelUseLayerName)) -
+              Number(Boolean(b.layer.style.labelUseLayerName)),
+          );
+          for (const { layer } of labelOrder) {
+            for (const id of ["label-" + layer.id, "label-" + layer.id + "-lines"])
+              if (map.getLayer(id)) map.moveLayer(id);
+          }
           orderSignatureRef.current = orderSignature;
         }
         ensureDraftLayers(map);
         map.triggerRepaint();
+        if (Object.keys(syncErrors).length)
+          throw new Error("Overlay synchronization failed: " + JSON.stringify(syncErrors));
       } catch (error) {
         attempts += 1;
         if (attempts < 20) {
@@ -489,7 +555,7 @@ export function MapCanvas() {
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [prepared, ready, styleRevision]);
+  }, [prepared, ready, styleRevision, setLayerRenderErrors]);
 
   useEffect(() => {
     const map = mapObj.current;
@@ -840,6 +906,7 @@ export function MapCanvas() {
     if (!map || !ready) return;
 
     const onClick = (e: MapMouseEvent) => {
+      if (elevationProfileOpenRef.current) return;
       setMenu(null);
       const siteObjectRequest = pendingSiteObjectRef.current;
       if (siteObjectRequest) {
@@ -910,7 +977,7 @@ export function MapCanvas() {
           return;
         }
         const ids = wb.displayLayers
-          .filter((l) => l.visible)
+          .filter((l) => l.visible && !l.selectionLocked)
           .flatMap((l) => selectableLayerIds(l.id))
           .filter((id) => map.getLayer(id));
         const hits = ids.length > 0 ? map.queryRenderedFeatures(e.point, { layers: ids }) : [];
@@ -922,16 +989,30 @@ export function MapCanvas() {
             uniqueHits.set(`${layerId}:${index}`, candidate);
         }
         const candidates = [...uniqueHits.values()];
-        const hit = wb.activeLayerId
-          ? (candidates.find(
-              (candidate) => renderedLayerId(String(candidate.layer.id)) === wb.activeLayerId,
-            ) ?? candidates[0])
-          : candidates[0];
+        const layerOrder = new Map(wb.displayLayers.map((layer, index) => [layer.id, index]));
+        candidates.sort(
+          (a, b) =>
+            (layerOrder.get(renderedLayerId(String(a.layer.id))) ?? Infinity) -
+            (layerOrder.get(renderedLayerId(String(b.layer.id))) ?? Infinity),
+        );
+        const hit = candidates[0];
         const additive =
           mode === "select-multiple" ||
           e.originalEvent.shiftKey ||
           e.originalEvent.ctrlKey ||
           e.originalEvent.metaKey;
+        setOverlap(
+          candidates.length > 1
+            ? {
+                options: candidates.map((candidate) => ({
+                  layerId: renderedLayerId(String(candidate.layer.id)),
+                  index: renderedFeatureIndex(candidate),
+                })),
+                base: wb.selectedFeatures,
+                additive,
+              }
+            : null,
+        );
         if (!hit) {
           if (!additive) wb.setSelectedFeature(null);
           return;
@@ -1006,6 +1087,7 @@ export function MapCanvas() {
     };
 
     const onDblClick = (e: MapMouseEvent) => {
+      if (elevationProfileOpenRef.current) return;
       if (
         drawModeRef.current === "none" ||
         drawModeRef.current === "select-multiple" ||
@@ -1017,6 +1099,7 @@ export function MapCanvas() {
     };
 
     const onContext = (e: MapMouseEvent) => {
+      if (elevationProfileOpenRef.current) return;
       e.preventDefault();
       setMenu({ x: e.point.x, y: e.point.y, lng: e.lngLat.lng, lat: e.lngLat.lat });
     };
@@ -1051,7 +1134,7 @@ export function MapCanvas() {
       const height = Math.abs(e.point.y - box.startY);
       if (width < 4 && height < 4) return;
       const ids = wb.displayLayers
-        .filter((layer) => layer.visible)
+        .filter((layer) => layer.visible && !layer.selectionLocked)
         .flatMap((layer) => selectableLayerIds(layer.id))
         .filter((id) => map.getLayer(id));
       const hits = ids.length
@@ -1141,6 +1224,7 @@ export function MapCanvas() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (elevationProfileOpenRef.current) return;
       if (e.key === "Escape") {
         if (pendingSiteObjectRef.current) {
           setPendingSiteObject(null);
@@ -1230,6 +1314,16 @@ export function MapCanvas() {
     });
   };
 
+  useEffect(() => {
+    const map = mapObj.current;
+    if (!map || !overlap) return;
+    const dismiss = () => setOverlap(null);
+    map.on("movestart", dismiss);
+    return () => {
+      map.off("movestart", dismiss);
+    };
+  }, [overlap]);
+
   const vertexDrawingActive =
     wb.drawMode === "polygon" ||
     wb.drawMode === "line" ||
@@ -1244,6 +1338,69 @@ export function MapCanvas() {
 
   return (
     <div className="relative h-full w-full">
+      {overlap &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <section
+            aria-label="Overlapping features"
+            className="panel-surface fixed right-3 top-[max(5rem,calc(env(safe-area-inset-top)+4rem))] z-[85] w-72 max-w-[calc(100vw-1.5rem)] rounded-xl p-2 shadow-float"
+          >
+            <div className="flex items-center justify-between text-xs font-semibold">
+              Choose feature
+              <button
+                aria-label="Close feature chooser"
+                onClick={() => setOverlap(null)}
+                className="p-2"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <p className="mb-1 text-[10px] text-muted-foreground">
+              Top layer selected. Choose another underneath.
+            </p>
+            <div className="max-h-[30dvh] overflow-auto">
+              {overlap.options.map((option, i) => {
+                const layer = wb.displayLayers.find((layer) => layer.id === option.layerId);
+                if (!layer || !layer.visible || layer.selectionLocked) return null;
+                const feature = layer.data.features[option.index];
+                const name =
+                  feature?.properties?.["NAME"] ??
+                  feature?.properties?.["OWNER_NAME"] ??
+                  feature?.properties?.["OBJECTID"] ??
+                  option.index + 1;
+                return (
+                  <button
+                    key={option.layerId + ":" + option.index}
+                    className="mb-1 block w-full rounded-lg bg-secondary px-2 py-2 text-left text-xs hover:bg-accent"
+                    onClick={() => {
+                      wb.setSelectedFeatures(
+                        overlap.additive
+                          ? [
+                              ...overlap.base.filter(
+                                (item) =>
+                                  item.layerId !== option.layerId || item.index !== option.index,
+                              ),
+                              option,
+                            ]
+                          : [option],
+                      );
+                      wb.setActiveLayer(option.layerId);
+                      setOverlap(null);
+                    }}
+                  >
+                    <strong>
+                      {layer.name}
+                      {i === 0 ? " · Top" : ""}
+                    </strong>
+                    <span className="block truncate text-[10px]">{String(name)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>,
+          document.body,
+        )}
+
       <div ref={containerRef} className="h-full w-full" />
 
       {pendingSiteObject && (
@@ -1392,7 +1549,12 @@ export function MapCanvas() {
 
       {/* drawing helper bar */}
       {(wb.drawMode !== "none" || draft.length > 0) && (
-        <div className="pointer-events-auto absolute left-1/2 top-16 z-20 -translate-x-1/2 md:top-16">
+        <div
+          className={cn(
+            "landdraft-drawing-helper pointer-events-auto absolute left-1/2 top-16 z-20 -translate-x-1/2 md:top-16",
+            wb.drawMode === "select-multiple" && "mobile-selection-helper",
+          )}
+        >
           <div className="float-surface flex max-w-[calc(100vw-1rem)] flex-wrap items-center justify-center gap-1 rounded-2xl px-2 py-2 text-xs">
             <Crosshair className="size-4 text-primary" />
             <span className="font-medium">
@@ -1525,14 +1687,16 @@ export function MapCanvas() {
                 setMenu(null);
               }}
             />
-            <MenuItem
-              icon={<MapPin className="size-4" />}
-              label="Drop a pin here"
-              onClick={() => {
-                dropPin(menu.lng, menu.lat);
-                setMenu(null);
-              }}
-            />
+            {wb.canEditProject && (
+              <MenuItem
+                icon={<MapPin className="size-4" />}
+                label="Drop a pin here"
+                onClick={() => {
+                  dropPin(menu.lng, menu.lat);
+                  setMenu(null);
+                }}
+              />
+            )}
             {wb.canEditProject && (
               <MenuItem
                 icon={<StickyNote className="size-4" />}
@@ -1543,16 +1707,18 @@ export function MapCanvas() {
                 }}
               />
             )}
-            <MenuItem
-              icon={<Database className="size-4" />}
-              label="Find data here"
-              onClick={() => {
-                setLastPoint({ lng: menu.lng, lat: menu.lat });
-                setPendingCatalogQuery("");
-                setDrawerOpen(true);
-                setMenu(null);
-              }}
-            />
+            {wb.canEditProject && (
+              <MenuItem
+                icon={<Database className="size-4" />}
+                label="Find data here"
+                onClick={() => {
+                  setLastPoint({ lng: menu.lng, lat: menu.lat });
+                  setPendingCatalogQuery("");
+                  setDrawerOpen(true);
+                  setMenu(null);
+                }}
+              />
+            )}
             <MenuItem
               icon={<Crosshair className="size-4" />}
               label="Center map here"

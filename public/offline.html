@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#216f45" />
+    <title>LandDraft Offline Maps</title>
+    <link rel="manifest" href="/offline.webmanifest" />
+    <link rel="icon" href="/landdraft-icon-192.png" />
+    <link rel="stylesheet" href="/offline.css" />
+  </head>
+  <body>
+    <header>
+      <a href="/" title="Open the full LandDraft app when online">LandDraft (online)</a
+      ><strong>Offline maps · Preview</strong
+      ><select id="areas" aria-label="Saved offline area">
+        <option>Loading downloads…</option>
+      </select>
+    </header>
+    <main>
+      <canvas
+        id="map"
+        tabindex="0"
+        aria-label="Offline roads and parcels. Drag to pan, pinch or use plus and minus to zoom. Tap a parcel for owner information."
+      ></canvas>
+      <div id="tools">
+        <button id="fit" title="Fit saved area">Fit area</button
+        ><button id="plus" aria-label="Zoom in">+</button
+        ><button id="minus" aria-label="Zoom out">−</button><button id="gps">GPS off</button
+        ><button id="target" aria-pressed="false">Set target</button>
+      </div>
+      <output id="guidance" aria-live="polite"
+        >Choose a saved area. No network connection is needed.</output
+      >
+    </main>
+    <footer>
+      <p id="details">Public-data downloads remain on this device until removed.</p>
+      <p id="source"></p>
+      <small
+        >GPS bearing and straight-line distance only. No turn-by-turn routing, road-access check or
+        live traffic. Boundaries are not surveys. Outside the saved extent, no map data is
+        available.</small
+      >
+    </footer>
+    <script type="module" src="/offline-viewer.js"></script>
+  </body>
+</html>

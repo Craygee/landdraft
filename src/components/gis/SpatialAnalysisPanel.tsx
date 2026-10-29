@@ -9,7 +9,7 @@ import {
   union,
 } from "@turf/turf";
 import type { Feature, Geometry, Polygon, MultiPolygon } from "geojson";
-import { Beaker, ChevronDown, Loader2, Sparkles, Trash2, X } from "lucide-react";
+import { Beaker, ChevronDown, Loader2, Mountain, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { useWorkbench } from "@/lib/gis/store";
@@ -62,7 +62,15 @@ const operations: Array<{ id: Operation; name: string; description: string }> = 
 
 export function SpatialAnalysisPanel() {
   const wb = useWorkbench();
-  const { setAnalysisOpen, setPendingFeatureSave } = useMapRef();
+  const {
+    setAnalysisOpen,
+    setPendingFeatureSave,
+    setElevationProfileOpen,
+    setBuildableAreaOpen,
+    setDrawerOpen,
+    setTableOpen,
+    setEditEnabled,
+  } = useMapRef();
   const usableLayers = wb.layers.filter((layer) => layer.data.features.length > 0);
   const [layerId, setLayerId] = useState(wb.activeLayerId ?? usableLayers[0]?.id ?? "");
   const [overlayLayerId, setOverlayLayerId] = useState("");
@@ -244,6 +252,48 @@ export function SpatialAnalysisPanel() {
       </header>
 
       <div className="space-y-4 overflow-y-auto p-4 text-xs">
+        <button
+          onClick={() => {
+            wb.setDrawMode("none");
+            setEditEnabled(false);
+            setDrawerOpen(false);
+            setTableOpen(false);
+            setAnalysisOpen(false);
+            setElevationProfileOpen(false);
+            setBuildableAreaOpen(true);
+          }}
+          className="flex min-h-11 w-full items-start gap-3 rounded-2xl border border-primary/30 bg-primary/5 p-3 text-left"
+        >
+          <Beaker className="mt-1 size-5 shrink-0 text-primary" />
+          <span>
+            <strong className="block text-sm">Buildable Area</strong>
+            <span className="mt-1 block text-xs text-muted-foreground">
+              Screen a rectangle or polygon for mapped exclusions, conditional land and contiguous
+              candidate acreage.
+            </span>
+          </span>
+        </button>
+        <button
+          onClick={() => {
+            wb.setDrawMode("none");
+            wb.setSelectedFeatures([]);
+            setEditEnabled(false);
+            setDrawerOpen(false);
+            setTableOpen(false);
+            setAnalysisOpen(false);
+            setBuildableAreaOpen(false);
+            setElevationProfileOpen(true);
+          }}
+          className="flex min-h-11 w-full items-start gap-3 rounded-2xl border border-primary/30 bg-primary/5 p-3 text-left"
+        >
+          <Mountain className="mt-1 size-5 shrink-0 text-primary" />
+          <span>
+            <strong className="block text-sm">Elevation profile</strong>
+            <span className="mt-1 block text-xs text-muted-foreground">
+              Draw a path and inspect terrain elevation, distance and slope on an interactive graph.
+            </span>
+          </span>
+        </button>
         {usableLayers.length === 0 ? (
           <div className="rounded-2xl bg-secondary p-4 text-center text-muted-foreground">
             Add or draw a layer first, then return here to analyze it.

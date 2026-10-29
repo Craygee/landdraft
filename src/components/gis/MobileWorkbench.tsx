@@ -1,5 +1,7 @@
+import { SharedLayerPanel } from "./SharedLayerPanel";
+import { SharedNotesPanel } from "./SharedNotesPanel";
 import { WorkspaceLoading, WorkspaceRecoveryNotice } from "./WorkspaceLoading";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
 import {
   Database,
   FileDown,
@@ -19,6 +21,8 @@ import {
   Navigation,
   Waypoints,
   CloudSun,
+  MousePointer2,
+  NotebookPen,
 } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { LANDDRAFT_APP_CHANNEL, LANDDRAFT_APP_VERSION } from "@/lib/appVersion";
@@ -46,38 +50,56 @@ import { ProjectAreaControl } from "./ProjectAreaControl";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { LandDraftTools } from "./LandDraftTools";
 import { ButtonHelpSettings } from "@/components/ui/ButtonHelpSettings";
+
+import { MapLegendControl } from "./MapLegendControl";
+import { AccountPublicDataProvider } from "@/lib/gis/AccountPublicData";
+import { AccountServiceLayers } from "./AccountServiceLayers";
+import { MobileParcelStatus } from "./MobileParcelStatus";
+import { OfflineAreasPanel } from "./OfflineAreasPanel";
 import { FeatureAttributesWindow } from "./FeatureAttributesWindow";
 
+const ProjectRecordsPanel = lazy(() =>
+  import("./ProjectRecordsPanel").then((module) => ({ default: module.ProjectRecordsPanel })),
+);
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
 );
 const PrintComposer = lazy(() =>
   import("./PrintComposer").then((module) => ({ default: module.PrintComposer })),
 );
+const ElevationProfilePanel = lazy(() =>
+  import("./ElevationProfilePanel").then((module) => ({ default: module.ElevationProfilePanel })),
+);
 const SpatialAnalysisPanel = lazy(() =>
   import("./SpatialAnalysisPanel").then((module) => ({ default: module.SpatialAnalysisPanel })),
+);
+const BuildableAreaPanel = lazy(() =>
+  import("./BuildableAreaPanel").then((module) => ({ default: module.BuildableAreaPanel })),
 );
 
 export default function MobileWorkbench() {
   return (
     <AuthGate>
-      <WorkbenchProvider>
-        <MapRefProvider>
-          <TourProvider>
-            <MobileShell />
-            <RemoteLayerManager />
-            <FeatureDestinationDialog />
-            <ConnectionManager />
-            <Toaster
-              mobileOffset={{
-                bottom: "calc(10.5rem + env(safe-area-inset-bottom, 0px))",
-                left: ".5rem",
-                right: ".5rem",
-              }}
-            />
-          </TourProvider>
-        </MapRefProvider>
-      </WorkbenchProvider>
+      <AccountPublicDataProvider>
+        <WorkbenchProvider>
+          <MapRefProvider>
+            <TourProvider>
+              <MobileShell />
+              <RemoteLayerManager />
+              <AccountServiceLayers />
+              <FeatureDestinationDialog />
+              <ConnectionManager floatingBadge={false} />
+              <Toaster
+                mobileOffset={{
+                  bottom: "calc(10.5rem + env(safe-area-inset-bottom, 0px))",
+                  left: ".5rem",
+                  right: ".5rem",
+                }}
+              />
+            </TourProvider>
+          </MapRefProvider>
+        </WorkbenchProvider>
+      </AccountPublicDataProvider>
     </AuthGate>
   );
 }
@@ -85,19 +107,28 @@ export default function MobileWorkbench() {
 type Sheet = "layers" | "data" | "draw" | "export" | "projects" | "help" | null;
 
 function MobileShell() {
+  const [offlineOpen, setOfflineOpen] = useState(false);
+  const [quickPanel, setQuickPanel] = useState<"legend" | null>(null);
   const [sheet, setSheet] = useState<Sheet>(null);
-  const [fieldMode, setFieldModeState] = useState(() => {
+  const [fieldModePreference, setFieldModeState] = useState(() => {
     if (typeof window === "undefined") return true;
     return window.localStorage.getItem("landdraft.mobile-mode.v1") !== "map";
   });
   const wb = useWorkbench();
+  const fieldMode = wb.canEditProject && fieldModePreference;
   const {
     setDrawerOpen,
     tableOpen,
+    setTableOpen,
+    recordsOpen,
+    setRecordsOpen,
+    setConnectionsOpen,
     assistantOpen,
     setAssistantOpen,
     printOpen,
     setPrintOpen,
+    elevationProfileOpen,
+    buildableAreaOpen,
     analysisOpen,
     setAnalysisOpen,
   } = useMapRef();
@@ -107,6 +138,20 @@ function MobileShell() {
     window.localStorage.setItem("landdraft.mobile-mode.v1", enabled ? "field" : "map");
     setSheet(null);
   };
+  useEffect(() => {
+    setSheet((current) => (current === "draw" ? null : current));
+    setQuickPanel(null);
+  }, [wb.drawMode]);
+  useEffect(() => {
+    if (sheet) setQuickPanel(null);
+  }, [sheet]);
+
+  useEffect(() => {
+    if (wb.selectedFeatures.length && wb.drawMode === "select-multiple") {
+      setSheet(null);
+      setQuickPanel(null);
+    }
+  }, [wb.selectedFeatures.length, wb.drawMode]);
 
   if (!wb.projectReady) return <WorkspaceLoading />;
 
@@ -116,6 +161,18 @@ function MobileShell() {
         "app-viewport relative bg-background",
         fieldMode ? "mobile-field-mode" : "mobile-map-mode",
         wb.selectedFeatures.length > 0 && "mobile-has-selection",
+        (sheet ||
+          quickPanel ||
+          offlineOpen ||
+          recordsOpen ||
+          tableOpen ||
+          assistantOpen ||
+          printOpen ||
+          analysisOpen ||
+          elevationProfileOpen ||
+          buildableAreaOpen) &&
+          "mobile-has-panel",
+        !["none", "select-multiple", "select-box"].includes(wb.drawMode) && "mobile-is-drawing",
       )}
     >
       <div className="absolute inset-x-2 top-24 z-40">
@@ -123,14 +180,22 @@ function MobileShell() {
       </div>
       <MapCanvas />
       <FeatureAttributesWindow />
-      {!fieldMode && <SelectionToolbar mobile />}
+      {wb.canEditProject &&
+        !fieldMode &&
+        ["none", "select-multiple", "select-box"].includes(wb.drawMode) && (
+          <SelectionToolbar mobile />
+        )}
 
       <header className="mobile-primary-header pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-1.5 p-2 pt-[max(.5rem,env(safe-area-inset-top))] min-[520px]:gap-2 min-[520px]:p-3 min-[520px]:pt-[max(.75rem,env(safe-area-inset-top))]">
         <div className="float-surface pointer-events-auto flex min-w-0 max-w-[calc(100%-8.75rem)] items-center gap-1.5 rounded-2xl px-2 py-2 min-[520px]:max-w-[calc(100%-15rem)] min-[520px]:gap-2 min-[520px]:px-2.5">
           <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <LandDraftMark className="size-5" />
           </span>
-          <ProjectSwitcher mode="mobile" />
+          {wb.canEditProject ? (
+            <ProjectSwitcher mode="mobile" />
+          ) : (
+            <span className="truncate text-xs font-semibold">{wb.projectName}</span>
+          )}
           <button
             onClick={() => {
               const params = new URLSearchParams(window.location.search);
@@ -150,18 +215,20 @@ function MobileShell() {
           </span>
         </div>
         <div className="float-surface pointer-events-auto ml-auto grid shrink-0 grid-cols-3 rounded-2xl p-1">
-          <button
-            onClick={() => setFieldMode(true)}
-            aria-pressed={fieldMode}
-            title="Field mode"
-            className={cn(
-              "flex items-center gap-1 rounded-xl px-2.5 py-2 text-[10px] font-semibold",
-              fieldMode && "bg-primary text-primary-foreground",
-            )}
-          >
-            <Navigation className="size-3.5" />{" "}
-            <span className="hidden min-[520px]:inline">Field</span>
-          </button>
+          {wb.canEditProject && (
+            <button
+              onClick={() => setFieldMode(true)}
+              aria-pressed={fieldMode}
+              title="Field mode"
+              className={cn(
+                "flex items-center gap-1 rounded-xl px-2.5 py-2 text-[10px] font-semibold",
+                fieldMode && "bg-primary text-primary-foreground",
+              )}
+            >
+              <Navigation className="size-3.5" />{" "}
+              <span className="hidden min-[520px]:inline">Field</span>
+            </button>
+          )}
           <button
             onClick={() => setFieldMode(false)}
             aria-pressed={!fieldMode}
@@ -188,7 +255,7 @@ function MobileShell() {
       {!fieldMode && (
         <div className="pointer-events-none absolute inset-x-3 top-[calc(4.5rem+env(safe-area-inset-top))] z-20 flex min-w-0 items-start gap-2">
           <div data-tour="map-search" className="pointer-events-auto min-w-0 flex-1">
-            <SearchBox />
+            {wb.canSearchMap && <SearchBox />}
           </div>
           <div className="pointer-events-auto ml-auto hidden shrink-0 gap-2 sm:flex">
             <button
@@ -199,15 +266,17 @@ function MobileShell() {
             >
               <Info className="size-4" />
             </button>
-            <button
-              onClick={() => setSheet(sheet === "projects" ? null : "projects")}
-              aria-label="Projects and account"
-              title="Open projects and account settings"
-              className="float-surface rounded-2xl p-3"
-              data-tour="top-projects"
-            >
-              <FolderOpen className="size-4" />
-            </button>
+            {wb.canEditProject && (
+              <button
+                onClick={() => setSheet(sheet === "projects" ? null : "projects")}
+                aria-label="Projects and account"
+                title="Open projects and account settings"
+                className="float-surface rounded-2xl p-3"
+                data-tour="top-projects"
+              >
+                <FolderOpen className="size-4" />
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -218,15 +287,24 @@ function MobileShell() {
           className="pointer-events-auto absolute right-3 top-[calc(8.25rem+env(safe-area-inset-top))] z-20"
         >
           <BasemapControl dropDirection="down" />
+          <div className="mt-2 flex justify-end">
+            <MapLegendControl
+              open={quickPanel === "legend"}
+              onOpenChange={(open) => {
+                setQuickPanel(open ? "legend" : null);
+                if (open) setSheet(null);
+              }}
+            />
+          </div>
         </div>
       )}
 
       <div className={fieldMode ? undefined : "hidden"}>
-        <FieldModule active={fieldMode} />
+        {wb.canEditProject && <FieldModule active={fieldMode} />}
       </div>
 
       {!fieldMode && sheet && (
-        <section className="mobile-sheet-height panel-surface absolute inset-x-2 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-40 overflow-hidden rounded-3xl">
+        <section className="mobile-sheet-height panel-surface absolute inset-x-2 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-40 max-h-[calc(100dvh-12rem)] overflow-y-auto rounded-3xl">
           <div className="flex items-center border-b border-border px-4 py-2">
             <h2 className="text-sm font-semibold">
               {sheet === "layers"
@@ -252,11 +330,83 @@ function MobileShell() {
           </div>
           {sheet === "layers" ? (
             <div data-tour="layer-panel" className="mobile-layer-height">
-              <LayerPanel />
+              {wb.canEditProject ? <LayerPanel /> : <SharedLayerPanel />}
+            </div>
+          ) : sheet === "data" && !wb.canEditProject ? (
+            <div className="space-y-2 p-4">
+              <button
+                className="w-full rounded-xl bg-secondary p-3 text-left"
+                onClick={() => {
+                  setSheet(null);
+                  setTableOpen(true);
+                }}
+              >
+                View shared attributes
+              </button>
+              {wb.canViewNotes && (
+                <button
+                  className="w-full rounded-xl bg-secondary p-3 text-left"
+                  onClick={() => {
+                    setSheet(null);
+                    setRecordsOpen(true);
+                  }}
+                >
+                  View project & layer notes
+                </button>
+              )}
             </div>
           ) : sheet === "data" ? (
             <div className="grid gap-2 p-4">
               <LandDraftTools />
+              <button
+                onClick={() => {
+                  setSheet(null);
+                  setQuickPanel(null);
+                  setConnectionsOpen(true);
+                }}
+                className="flex min-h-11 items-center gap-3 rounded-2xl bg-secondary p-4 text-left"
+              >
+                <Database className="size-5 text-primary" />
+                <span>
+                  <strong className="block text-sm">Connections & source errors</strong>
+                  <span className="text-[10px] text-muted-foreground">
+                    Check or repair connections. Status stays here, off the map.
+                  </span>
+                </span>
+              </button>
+              <MobileParcelStatus />
+              <button
+                onClick={() => {
+                  setSheet(null);
+                  setQuickPanel(null);
+                  setRecordsOpen(true);
+                }}
+                className="flex min-h-11 items-center gap-3 rounded-2xl bg-secondary p-4 text-left"
+              >
+                <NotebookPen className="size-5 text-primary" />
+                <span>
+                  <strong className="block text-sm">Project & layer notes</strong>
+                  <span className="text-[10px] text-muted-foreground">
+                    Read notes, add a project or layer note, and attach files.
+                  </span>
+                </span>
+              </button>
+              <button
+                onClick={() => {
+                  setSheet(null);
+                  setQuickPanel(null);
+                  setOfflineOpen(true);
+                }}
+                className="flex items-center gap-3 rounded-2xl bg-secondary p-4 text-left"
+              >
+                <Map className="size-5 text-primary" />
+                <span>
+                  <strong className="block text-sm">Offline areas</strong>
+                  <span className="text-[10px] text-muted-foreground">
+                    Download roads and Texas parcels for GPS use without a connection.
+                  </span>
+                </span>
+              </button>
               <button
                 onClick={() => {
                   setSheet(null);
@@ -324,13 +474,15 @@ function MobileShell() {
               </button>
             </div>
           ) : sheet === "draw" ? (
-            <div className="overflow-x-auto p-3">
-              <DrawToolbar />
-            </div>
+            <div className="overflow-x-auto p-3">{wb.canEditProject && <DrawToolbar />}</div>
           ) : sheet === "help" ? (
             <MobileTourMenu onDone={() => setSheet(null)} />
           ) : sheet === "projects" ? (
-            <ProjectMenu onClose={() => setSheet(null)} />
+            wb.canEditProject ? (
+              <ProjectMenu onClose={() => setSheet(null)} />
+            ) : (
+              <p className="p-4 text-sm">This shared map is view only.</p>
+            )
           ) : (
             <ExportPanel onDone={() => setSheet(null)} />
           )}
@@ -343,14 +495,37 @@ function MobileShell() {
         </div>
       )}
       <DataDrawer />
-      {analysisOpen && (
+      {recordsOpen && !wb.canEditProject && wb.canViewNotes && <SharedNotesPanel />}
+      {recordsOpen && wb.canEditProject && (
+        <Suspense
+          fallback={
+            <div role="status" className="fixed inset-0 z-[95] grid place-items-center bg-card">
+              Loading project notes…
+            </div>
+          }
+        >
+          <ProjectRecordsPanel key={wb.projectId} />
+        </Suspense>
+      )}
+      {offlineOpen && <OfflineAreasPanel onClose={() => setOfflineOpen(false)} />}
+      {analysisOpen && wb.canEditProject && (
         <Suspense fallback={null}>
           <SpatialAnalysisPanel />
         </Suspense>
       )}
-      {assistantOpen && (
+      {assistantOpen && wb.canUseAi && (
         <Suspense fallback={null}>
           <AiAssistant />
+        </Suspense>
+      )}
+      {elevationProfileOpen && wb.canEditProject && (
+        <Suspense fallback={null}>
+          <ElevationProfilePanel />
+        </Suspense>
+      )}
+      {buildableAreaOpen && wb.canEditProject && (
+        <Suspense fallback={null}>
+          <BuildableAreaPanel />
         </Suspense>
       )}
       {printOpen && (
@@ -360,7 +535,10 @@ function MobileShell() {
       )}
 
       {!fieldMode && (
-        <nav className="panel-surface absolute inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] z-30 grid h-14 grid-cols-5 rounded-2xl p-1">
+        <nav
+          className="panel-surface absolute inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] z-30 grid h-14 rounded-2xl p-1"
+          style={{ gridTemplateColumns: `repeat(${wb.canEditProject ? 6 : 3},minmax(0,1fr))` }}
+        >
           <NavButton
             active={sheet === "layers"}
             icon={<Layers3 className="size-5" />}
@@ -375,32 +553,49 @@ function MobileShell() {
             tourId="top-public-data"
             onClick={() => setSheet(sheet === "data" ? null : "data")}
           />
-          <NavButton
-            active={sheet === "draw"}
-            icon={<PencilRuler className="size-5" />}
-            label="Draw"
-            tourId="draw-toolbar"
-            onClick={() => setSheet(sheet === "draw" ? null : "draw")}
-          />
-          <NavButton
-            icon={<Sparkles className="size-5" />}
-            label="AI"
-            tourId="top-ai"
-            onClick={() => {
-              setSheet(null);
-              setAssistantOpen(true);
-            }}
-          />
+          {wb.canEditProject && (
+            <NavButton
+              active={wb.drawMode === "select-multiple"}
+              icon={<MousePointer2 className="size-5" />}
+              label={
+                wb.selectedFeatures.length ? `Select · ${wb.selectedFeatures.length}` : "Select"
+              }
+              onClick={() => {
+                setSheet(null);
+                setQuickPanel(null);
+                wb.setDrawMode(wb.drawMode === "select-multiple" ? "none" : "select-multiple");
+              }}
+            />
+          )}
+          {wb.canEditProject && (
+            <NavButton
+              active={sheet === "draw"}
+              icon={<PencilRuler className="size-5" />}
+              label="Draw"
+              tourId="draw-toolbar"
+              onClick={() => setSheet(sheet === "draw" ? null : "draw")}
+            />
+          )}
+          {wb.canUseAi && (
+            <NavButton
+              icon={<Sparkles className="size-5" />}
+              label="AI"
+              tourId="top-ai"
+              onClick={() => {
+                setSheet(null);
+                setAssistantOpen(true);
+              }}
+            />
+          )}
           <NavButton
             active={sheet === "export"}
             icon={
               sheet === "export" ? <FileDown className="size-5" /> : <Printer className="size-5" />
             }
-            label="Print / export"
+            label="Export"
             tourId="top-print"
             onClick={() => {
-              if (sheet === "export") setPrintOpen(true);
-              else setSheet("export");
+              setSheet(sheet === "export" ? null : "export");
             }}
           />
         </nav>
@@ -428,14 +623,14 @@ function NavButton({
       title={label}
       aria-label={label}
       className={cn(
-        "flex flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-medium",
+        "flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl px-0.5 text-[10px] font-medium",
         active ? "bg-primary text-primary-foreground" : "hover:bg-accent",
       )}
       aria-pressed={active}
       data-tour={tourId}
     >
       {icon}
-      {label}
+      <span className="max-w-full truncate">{label}</span>
     </button>
   );
 }

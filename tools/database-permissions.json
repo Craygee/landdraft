@@ -1,0 +1,260 @@
+{
+  "profiles": {
+    "authenticated": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": []
+  },
+  "projects": {
+    "authenticated": [
+      "SELECT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": []
+  },
+  "project_members": {
+    "authenticated": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": []
+  },
+  "project_versions": {
+    "authenticated": [
+      "SELECT",
+      "INSERT",
+      "DELETE"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": []
+  },
+  "project_shares": {
+    "authenticated": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": []
+  },
+  "share_members": {
+    "authenticated": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": []
+  },
+  "share_submissions": {
+    "authenticated": [
+      "SELECT",
+      "INSERT",
+      "UPDATE"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": []
+  },
+  "weather_provider_connections": {
+    "authenticated": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": []
+  },
+  "project_email_aliases": {
+    "authenticated": [
+      "SELECT"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": []
+  },
+  "project_inbound_emails": {
+    "authenticated": [
+      "SELECT",
+      "DELETE"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": []
+  },
+  "project_inbound_attachments": {
+    "authenticated": [
+      "SELECT"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": []
+  },
+  "weather_product_entitlements": {
+    "authenticated": [
+      "SELECT"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": []
+  },
+  "weather_provider_audit_events": {
+    "authenticated": [
+      "SELECT"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": []
+  },
+  "ai_daily_usage": {
+    "authenticated": [],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": []
+  },
+  "weather_license_reviews": {
+    "authenticated": [],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": []
+  },
+  "weather_provider_catalog": {
+    "authenticated": [
+      "SELECT"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": [
+      "SELECT"
+    ]
+  },
+  "weather_product_catalog": {
+    "authenticated": [
+      "SELECT"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": [
+      "SELECT"
+    ]
+  },
+  "weather_chaser_presence": {
+    "authenticated": [],
+    "anon": [],
+    "service_role": [],
+    "rpcOnly": true
+  },
+  "parcel_cache_policy": {
+    "authenticated": [
+      "SELECT"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": [],
+    "optional": true
+  },
+  "project_parcel_cache": {
+    "authenticated": [
+      "SELECT"
+    ],
+    "service_role": [
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE"
+    ],
+    "anon": [],
+    "optional": true
+  }
+}

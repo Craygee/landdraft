@@ -1,3 +1,4 @@
+import { pointSymbolOpacity } from "@/lib/gis/iconOpacity";
 import { useId } from "react";
 
 import { legendDashArray, legendSymbolForLayer } from "@/lib/gis/legendSymbol";
@@ -24,6 +25,7 @@ export function LegendSwatch({ layer, scale = 1 }: { layer: GisLayer; scale?: nu
             className="flex items-center justify-center leading-none"
             style={{
               color: symbol.markerColor,
+              opacity: symbol.markerOpacity,
               fontSize: `${Math.min(height - 2, Math.max(9, symbol.markerSize * 0.7 * scale))}px`,
             }}
           >
@@ -36,7 +38,7 @@ export function LegendSwatch({ layer, scale = 1 }: { layer: GisLayer; scale?: nu
               width: Math.max(7, Math.min(height - 3, symbol.markerSize * scale)),
               height: Math.max(7, Math.min(height - 3, symbol.markerSize * scale)),
               backgroundColor: symbol.fillColor,
-              opacity: Math.max(0.35, symbol.fillOpacity),
+              opacity: symbol.fillOpacity * pointSymbolOpacity(layer.style),
               border: `${Math.max(1, lineWidth / 2)}px solid ${symbol.strokeColor}`,
             }}
           />

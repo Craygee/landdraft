@@ -50,3 +50,6 @@ comment on table public.weather_provider_connections is
   'Encrypted, user-owned credentials for optional commercial weather providers.';
 comment on column public.weather_provider_connections.encrypted_credentials is
   'AES-GCM ciphertext. The decryption key exists only in the LandDraft server environment.';
+
+-- Explicit server access: do not depend on Supabase automatic Data API grants.
+grant select, insert, update, delete on public.weather_provider_connections to service_role;

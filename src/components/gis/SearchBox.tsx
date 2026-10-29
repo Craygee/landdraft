@@ -167,7 +167,7 @@ export function SearchBox() {
       {parcelSearchOpen && <ParcelSearchPanel onClose={() => setParcelSearchOpen(false)} />}
 
       {!parcelSearchOpen && open && results.length > 0 && (
-        <div className="float-surface mt-2 max-h-72 overflow-auto rounded-2xl p-1">
+        <div className="float-surface mt-2 max-h-[min(18rem,calc(100dvh-12rem))] overflow-auto rounded-2xl p-1">
           {results.map((r) => (
             <div
               key={r.id + r.label}

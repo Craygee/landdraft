@@ -25,12 +25,19 @@ function validPoint(value: unknown): value is TerrainSampleRequestPoint {
 }
 
 function numericValue(value: unknown): number | undefined {
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "boolean" ||
+    (typeof value === "string" && !value.trim())
+  )
+    return undefined;
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) && parsed > -100_000 ? parsed : undefined;
 }
 
 async function queryPoint(point: TerrainSampleRequestPoint): Promise<TerrainSampleResponsePoint> {
-  const key = `${point.longitude.toFixed(5)},${point.latitude.toFixed(5)}`;
+  const key = `${point.longitude.toFixed(7)},${point.latitude.toFixed(7)}`;
   const cached = cache.get(key);
   if (cached && cached.expiresAt > Date.now())
     return {
@@ -56,7 +63,9 @@ async function queryPoint(point: TerrainSampleRequestPoint): Promise<TerrainSamp
     const payload = (await response.json()) as Record<string, unknown>;
     const elevationM = numericValue(payload["value"]);
     if (elevationM === undefined) return { ...point, elevationM: null };
-    const resolutionM = numericValue(payload["resolution"]);
+    const rawResolution = numericValue(payload["resolution"]);
+    const resolutionM =
+      rawResolution !== undefined && rawResolution > 0 ? rawResolution : undefined;
     cache.set(key, {
       elevationM,
       ...(resolutionM === undefined ? {} : { resolutionM }),

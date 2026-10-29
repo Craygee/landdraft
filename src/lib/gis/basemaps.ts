@@ -68,14 +68,21 @@ export const basemaps: Basemap[] = [
   {
     id: "topo",
     label: "Topo",
-    blurb: "Contours & terrain",
+    blurb: "USGS terrain & contours",
     style: raster(
+      ["https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}"],
+      "USGS The National Map and contributors",
+      16,
+    ),
+    healthUrl: "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/0/0/0",
+    connectionUrl:
+      "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}",
+    fallbackStyle: raster(
       ["https://tile.opentopomap.org/{z}/{x}/{y}.png"],
       "© OpenTopoMap (CC-BY-SA), © OpenStreetMap contributors",
       17,
     ),
-    healthUrl: "https://tile.opentopomap.org/0/0/0.png",
-    connectionUrl: "https://tile.opentopomap.org/{z}/{x}/{y}.png",
+    fallbackHealthUrl: "https://tile.opentopomap.org/0/0/0.png",
   },
   {
     id: "dark",
@@ -129,6 +136,7 @@ export function basemapProbeUrl(raw: string): string {
 
 const basemapAttribution = (url: string) => {
   if (/World_Imagery/i.test(url)) return "Imagery © Esri, Maxar, Earthstar Geographics";
+  if (/USGSTopo/i.test(url)) return "USGS The National Map and contributors";
   if (/World_Topo_Map/i.test(url)) return "Map data © Esri and contributors";
   if (/opentopomap/i.test(url)) return "© OpenTopoMap (CC-BY-SA), © OpenStreetMap contributors";
   if (/openfreemap|openstreetmap/i.test(url)) return "© OpenStreetMap contributors";
@@ -139,7 +147,11 @@ function basemapStyleFromUrl(raw: string): StyleSpecification | string {
   let url = raw.trim();
   if (/\/MapServer\/?$/i.test(url)) url = `${url.replace(/\/$/, "")}/tile/{z}/{y}/{x}`;
   if (url.includes("{z}") && url.includes("{x}") && url.includes("{y}"))
-    return raster([url], basemapAttribution(url), /opentopomap/i.test(url) ? 17 : 19);
+    return raster(
+      [url],
+      basemapAttribution(url),
+      /USGSTopo/i.test(url) ? 16 : /opentopomap/i.test(url) ? 17 : 19,
+    );
   return url;
 }
 

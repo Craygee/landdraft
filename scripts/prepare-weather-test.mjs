@@ -7,7 +7,9 @@ if (branch !== "codex/landdraft-test")
   throw new Error("Test deployment requires codex/landdraft-test");
 const env = process.env;
 if (env.VITE_LANDDRAFT_ACCESS_ENFORCEMENT !== "true")
-  throw new Error("Test access controls are active: build and deploy with VITE_LANDDRAFT_ACCESS_ENFORCEMENT=true");
+  throw new Error(
+    "Test access controls are active: build and deploy with VITE_LANDDRAFT_ACCESS_ENFORCEMENT=true",
+  );
 const url = "https://unuxnecqjvmtztxxqudb.supabase.co";
 if (
   env.VITE_SUPABASE_URL !== url ||

@@ -1,3 +1,7 @@
+import { applyGroupStyle } from "./groupStyle";
+import { toggleLayerTreeSelection } from "./layerTreeSelection";
+import { applySharePermissions, sharedCapabilities } from "./sharePermissions";
+import { preserveSelectedFeatures } from "./stableSelection";
 import type { WaterWorkspaceState } from "@/lib/water/types";
 import {
   createContext,
@@ -160,11 +164,24 @@ const blankProjectState = (name: string): ProjectState => ({
 });
 
 const normalizedLayer = (layer: GisLayer, index: number): GisLayer => {
-  const source =
+  let source =
     layer.source.kind === "remote" && layer.source.catalogId && !layer.source.requiresViewport
       ? { ...layer.source, requiresViewport: true }
       : layer.source;
   const style = normalizeLayerStyle(layer.style, index);
+  // Apply the requested parcel defaults once. Later user zoom/font edits survive reopening.
+  if (
+    source.kind === "remote" &&
+    source.catalogId === "tx-parcels" &&
+    (source.parcelDisplayVersion ?? 0) < 2
+  ) {
+    const previousMinZoom = source.minZoom;
+    source = { ...source, parcelDisplayVersion: 2 };
+    if (previousMinZoom === undefined || [8, 9, 11, 12].includes(previousMinZoom))
+      source.minZoom = 10;
+    if (style.labelMinZoom === 8 || style.labelMinZoom === 9) style.labelMinZoom = 11;
+    if (style.labelSize === 11) style.labelScaleWithZoom = true;
+  }
   return {
     ...layer,
     data: normalizeLayerData(layer.data),
@@ -409,6 +426,7 @@ export interface WorkbenchApi extends WorkbenchState {
   duplicateProject: (id: string) => Promise<void>;
   duplicateVersion: (versionId: string) => Promise<void>;
   promoteProject: (id: string) => Promise<void>;
+  moveProject: (id: string, parentId: string) => Promise<void>;
   toggleSubprojectOverlay: (id: string, enabled: boolean) => Promise<void>;
   openProject: (id: string) => Promise<void>;
   openSharedMap: (id: string) => Promise<void>;
@@ -427,6 +445,11 @@ export interface WorkbenchApi extends WorkbenchState {
   activeLayer: GisLayer | null;
   displayLayers: GisLayer[];
   canEditProject: boolean;
+  canExportLayers: boolean;
+  canViewNotes: boolean;
+  canUseAi: boolean;
+  canSearchMap: boolean;
+  canBackupProject: boolean;
 }
 
 const WorkbenchContext = createContext<WorkbenchApi | null>(null);
@@ -585,7 +608,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         }));
         return;
       }
-      const sharedState = await downloadSharedState(share.statePath);
+      const sharedState = applySharePermissions(
+        await downloadSharedState(share.statePath),
+        share.permissions,
+      );
       const now = share.updatedAt;
       const sharedProject: StoredProject = {
         id: share.projectId,
@@ -641,6 +667,11 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
   const addLayer = useCallback<WorkbenchApi["addLayer"]>(
     (input) => {
+      if (
+        !sharedCapabilities(stateRef.current.accessRole, stateRef.current.activeShare?.permissions)
+          .canEditProject
+      )
+        throw new Error("This shared map is view only.");
       const existing = stateRef.current.layers;
       const style =
         input.source.kind === "derived"
@@ -704,18 +735,46 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateDisplayLayer = useCallback<WorkbenchApi["updateDisplayLayer"]>((id, p) => {
-    setState((s) => ({
-      ...s,
-      layers: s.layers.map((layer) => (layer.id === id ? { ...layer, ...p } : layer)),
-      subprojectOverlays: s.subprojectOverlays.map((overlay) => ({
-        ...overlay,
-        layers: overlay.layers.map((layer) => (layer.id === id ? { ...layer, ...p } : layer)),
-      })),
-    }));
+    setState((s) => {
+      const previous =
+        s.layers.find((layer) => layer.id === id) ??
+        s.subprojectOverlays.flatMap((overlay) => overlay.layers).find((layer) => layer.id === id);
+      const selections = s.selectedFeatures.filter((item) => item.layerId === id);
+      const retained =
+        previous && p.data && selections.length
+          ? preserveSelectedFeatures(
+              previous.data,
+              p.data,
+              selections.map((item) => item.index),
+            )
+          : null;
+      const patch = retained ? { ...p, data: retained.data } : p;
+      let selectedIndex = 0;
+      const selectedFeatures = retained
+        ? s.selectedFeatures.map((item) =>
+            item.layerId === id ? { ...item, index: retained.indexes[selectedIndex++]! } : item,
+          )
+        : s.selectedFeatures;
+      return {
+        ...s,
+        selectedFeatures,
+        selectedFeature: selectedFeatures[0] ?? null,
+        layers: s.layers.map((layer) => (layer.id === id ? { ...layer, ...patch } : layer)),
+        subprojectOverlays: s.subprojectOverlays.map((overlay) => ({
+          ...overlay,
+          layers: overlay.layers.map((layer) => (layer.id === id ? { ...layer, ...patch } : layer)),
+        })),
+      };
+    });
   }, []);
 
   const setLayerNote = useCallback<WorkbenchApi["setLayerNote"]>(
     (id, note) => {
+      if (
+        !sharedCapabilities(stateRef.current.accessRole, stateRef.current.activeShare?.permissions)
+          .canEditProject
+      )
+        return;
       const nextNote = note.trim();
       const now = Date.now();
       setState((s) => {
@@ -1133,30 +1192,29 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
   const applyStyleToGroup = useCallback<WorkbenchApi["applyStyleToGroup"]>((id, stylePatch) => {
     setState((s) => {
-      const groupIds = descendantGroupIds(id, s.groups);
-      return {
-        ...s,
-        layers: s.layers.map((layer) =>
-          groupIds.has(layer.groupId)
-            ? { ...layer, style: { ...layer.style, ...stylePatch } }
-            : layer,
-        ),
-      };
+      return { ...s, layers: applyGroupStyle(s.layers, s.groups, id, stylePatch) };
     });
   }, []);
 
   const toggleLayerSelection = useCallback<WorkbenchApi["toggleLayerSelection"]>((id, additive) => {
     setState((s) => {
-      const selected = additive
-        ? s.selectedLayerIds.includes(id)
-          ? s.selectedLayerIds.filter((x) => x !== id)
-          : [...s.selectedLayerIds, id]
-        : [id];
+      const selected = toggleLayerTreeSelection(
+        id,
+        additive,
+        s.selectedLayerIds,
+        s.layers,
+        s.groups,
+      );
       return { ...s, selectedLayerIds: selected, activeLayerId: id };
     });
   }, []);
 
   const appendFeature = useCallback<WorkbenchApi["appendFeature"]>((layerId, feature) => {
+    if (
+      !sharedCapabilities(stateRef.current.accessRole, stateRef.current.activeShare?.permissions)
+        .canEditProject
+    )
+      return;
     setState((s) => ({
       ...s,
       layers: s.layers.map((l) =>
@@ -1169,6 +1227,11 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
   const updateFeatureProperties = useCallback<WorkbenchApi["updateFeatureProperties"]>(
     (layerId, index, properties) => {
+      if (
+        !sharedCapabilities(stateRef.current.accessRole, stateRef.current.activeShare?.permissions)
+          .canEditProject
+      )
+        return;
       setState((s) => ({
         ...s,
         layers: s.layers.map((layer) => {
@@ -1192,6 +1255,11 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
   const updateFeaturesProperties = useCallback<WorkbenchApi["updateFeaturesProperties"]>(
     (layerId, updates) => {
+      if (
+        !sharedCapabilities(stateRef.current.accessRole, stateRef.current.activeShare?.permissions)
+          .canEditProject
+      )
+        return;
       if (updates.length === 0) return;
       const updatesByIndex = new Map(updates.map((update) => [update.index, update.properties]));
       setState((s) => ({
@@ -1218,6 +1286,11 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
   const updateFeatureGeometry = useCallback<WorkbenchApi["updateFeatureGeometry"]>(
     (layerId, index, geometry) => {
+      if (
+        !sharedCapabilities(stateRef.current.accessRole, stateRef.current.activeShare?.permissions)
+          .canEditProject
+      )
+        return;
       setState((s) => ({
         ...s,
         layers: s.layers.map((layer) =>
@@ -1239,6 +1312,11 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   );
 
   const removeFeatures = useCallback<WorkbenchApi["removeFeatures"]>((layerId, indexes) => {
+    if (
+      !sharedCapabilities(stateRef.current.accessRole, stateRef.current.activeShare?.permissions)
+        .canEditProject
+    )
+      return;
     const removed = new Set(indexes);
     if (removed.size === 0) return;
     setState((current) => {
@@ -1272,12 +1350,24 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setAssistantConversation = useCallback<WorkbenchApi["setAssistantConversation"]>(
-    (assistant) => patch({ assistant }),
+    (assistant) => {
+      if (
+        sharedCapabilities(stateRef.current.accessRole, stateRef.current.activeShare?.permissions)
+          .canUseAi
+      )
+        patch({ assistant });
+    },
     [patch],
   );
 
   const setProjectRecords = useCallback<WorkbenchApi["setProjectRecords"]>(
-    (records) => patch({ records }),
+    (records) => {
+      if (
+        sharedCapabilities(stateRef.current.accessRole, stateRef.current.activeShare?.permissions)
+          .canEditProject
+      )
+        patch({ records });
+    },
     [patch],
   );
   const setPipelineEngineering = useCallback<WorkbenchApi["setPipelineEngineering"]>(
@@ -1492,6 +1582,34 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       const projects = await workspaceProjectStore.list(userId);
       skipNextAutosave.current = true;
       setState((value) => ({ ...value, ...normalizedProject(project, projects) }));
+    },
+    [auth.user?.id],
+  );
+
+  const moveProject = useCallback<WorkbenchApi["moveProject"]>(
+    async (id, parentId) => {
+      const userId = auth.user?.id;
+      if (!userId) throw new Error("Sign in to move a project.");
+      const projects = stateRef.current.projects;
+      if (!projects.some((p) => p.id === id) || !projects.some((p) => p.id === parentId))
+        throw new Error("Project unavailable.");
+      const visited = new Set<string>([id]);
+      let ancestor: string | null = parentId;
+      while (ancestor) {
+        if (visited.has(ancestor))
+          throw new Error("A project cannot be moved under itself or its descendants.");
+        visited.add(ancestor);
+        ancestor = projects.find((p) => p.id === ancestor)?.parentProjectId ?? null;
+      }
+      await workspaceProjectStore.setParent(userId, id, parentId);
+      const refreshed = await workspaceProjectStore.list(userId);
+      setState((current) => ({
+        ...current,
+        projects: refreshed,
+        enabledSubprojectIds: current.enabledSubprojectIds.filter((value) => value !== id),
+        subprojectOverlays: current.subprojectOverlays.filter((value) => value.projectId !== id),
+        ...(current.projectId === id ? { parentProjectId: parentId } : {}),
+      }));
     },
     [auth.user?.id],
   );
@@ -1923,7 +2041,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         patch({ selectedFeature: sel, selectedFeatures: sel ? [sel] : [] }),
       setSelectedFeatures: (selections) =>
         patch({ selectedFeatures: selections, selectedFeature: selections[0] ?? null }),
-      setDrawMode: (mode) => patch({ drawMode: mode }),
+      setDrawMode: (mode) => {
+        if (mode === "none" || state.accessRole === "owner" || state.accessRole === "admin")
+          patch({ drawMode: mode });
+      },
       setSnapEnabled: (enabled) => patch({ snapEnabled: enabled }),
       setSelectedStates: (states) => patch({ selectedStates: states }),
       setDerivedLayerGroupId: (groupId) => patch({ derivedLayerGroupId: groupId }),
@@ -1962,6 +2083,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       duplicateProject,
       duplicateVersion,
       promoteProject,
+      moveProject,
       toggleSubprojectOverlay,
       openProject,
       openSharedMap,
@@ -1979,7 +2101,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         ...state.layers,
         ...state.subprojectOverlays.flatMap((overlay) => overlay.layers),
       ],
-      canEditProject: state.accessRole === "owner" || state.accessRole === "admin",
+      ...sharedCapabilities(state.accessRole, state.activeShare?.permissions),
     }),
     [
       state,
@@ -2025,6 +2147,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       duplicateProject,
       duplicateVersion,
       promoteProject,
+      moveProject,
       toggleSubprojectOverlay,
       openProject,
       openSharedMap,

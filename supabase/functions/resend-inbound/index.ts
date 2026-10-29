@@ -131,12 +131,6 @@ Deno.serve(async (request) => {
   if (aliasError) throw aliasError;
   const alias = aliases?.[0] as AliasRow | undefined;
   if (!alias) return json({ accepted: true, routed: false });
-  if (Deno.env.get('LANDDRAFT_ACCESS_ENFORCEMENT') === 'true') {
-    const { data: permitted, error: accessError } = await supabase.rpc('landdraft_service_access', { p_user: alias.owner_id });
-    // Retry transient verification failure; do not acknowledge lost incoming mail.
-    if (accessError) return json({ error: 'Account access could not be verified' }, 503);
-    if (permitted !== true) return json({ accepted: true, routed: false });
-  }
 
   const { data: existing } = await supabase
     .from("project_inbound_emails")

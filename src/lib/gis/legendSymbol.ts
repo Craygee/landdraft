@@ -1,3 +1,5 @@
+import { layerOpacity } from "./layerOpacity.ts";
+import { pointSymbolOpacity } from "./iconOpacity.ts";
 import type { Geometry } from "geojson";
 import { catalog } from "./catalog.ts";
 import type { FillPattern, GisLayer, StrokePattern } from "./types";
@@ -16,6 +18,7 @@ export interface LegendSymbol {
   markerIcon: string;
   markerColor: string;
   markerSize: number;
+  markerOpacity: number;
 }
 
 const geometryFamily = (geometry: Geometry | null): "point" | "line" | "polygon" | null => {
@@ -80,15 +83,16 @@ export function legendSymbolForLayer(layer: GisLayer): LegendSymbol {
   return {
     kind,
     fillColor: layer.style.fillColor,
-    fillOpacity: layer.style.fillOpacity,
+    fillOpacity: layer.style.fillOpacity * layerOpacity(layer.style),
     fillPattern: layer.style.fillPattern,
     strokeColor: layer.style.strokeColor,
-    strokeOpacity: layer.style.strokeOpacity,
+    strokeOpacity: layer.style.strokeOpacity * layerOpacity(layer.style),
     strokeWidth: layer.style.strokeWidth,
     strokePattern: layer.style.strokePattern,
     markerIcon: representativeMarker(layer),
     markerColor: layer.style.pointIconColor ?? layer.style.fillColor ?? layer.style.strokeColor,
     markerSize: layer.style.pointIconSize || layer.style.pointSize,
+    markerOpacity: pointSymbolOpacity(layer.style) * layerOpacity(layer.style),
   };
 }
 

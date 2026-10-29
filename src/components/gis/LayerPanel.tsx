@@ -1,3 +1,8 @@
+import { layerOpacity } from "@/lib/gis/layerOpacity";
+import { GroupLabelStyleEditor } from "./GroupLabelStyleEditor";
+import { layerTreeIds } from "@/lib/gis/layerTreeSelection";
+import { LayerSelectionActions } from "./LayerSelectionActions";
+import { LockKeyhole, LockKeyholeOpen } from "lucide-react";
 import { ParcelCacheControls } from "./ParcelCacheControls";
 import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { bbox as turfBbox } from "@turf/turf";
@@ -77,8 +82,12 @@ const remoteLoadLabel = (layer: GisLayer) => {
     return `${(expected ?? 0).toLocaleString()} features in view · zoom in to load all`;
   if (layer.source.loadStatus === "error")
     return layer.source.loadError ?? "Visible area could not finish loading";
+  if (layer.source.displayDetail === "overview")
+    return `${loaded.toLocaleString()} larger parcels · full detail at zoom 12+`;
   if (layer.source.loadStatus === "complete")
     return `${loaded.toLocaleString()} visible features · complete`;
+  if (layer.source.catalogId === "tx-parcels" && layer.data.features.length === 0)
+    return "Borders from zoom 10 · large-parcel labels from 11";
   if (layer.source.minZoom !== undefined && layer.data.features.length === 0)
     return `Ready · appears at zoom ${layer.source.minZoom}+`;
   return `${layer.data.features.length.toLocaleString()} visible features`;
@@ -922,16 +931,7 @@ export function LayerPanel() {
         >
           <ChevronsUp className="size-3" /> Minimize all
         </button>
-        {wb.selectedLayerIds.length > 1 && (
-          <button
-            type="button"
-            onClick={groupSelectedLayers}
-            className="flex items-center gap-1 rounded-lg bg-primary px-2 py-1 font-semibold text-primary-foreground"
-            title={`Create a group containing ${wb.selectedLayerIds.length} checked layers`}
-          >
-            <FolderPlus className="size-3" /> Group selected
-          </button>
-        )}
+        <LayerSelectionActions onGroup={groupSelectedLayers} />
       </div>
 
       {wb.selectedGroupIds.length > 0 && (
@@ -1188,11 +1188,25 @@ export function LayerPanel() {
                         >
                           <input
                             type="checkbox"
-                            checked={selected}
+                            checked={
+                              selected &&
+                              layerTreeIds(layer.id, wb.layers, wb.groups).every((id) =>
+                                wb.selectedLayerIds.includes(id),
+                              )
+                            }
+                            ref={(input) => {
+                              if (input) {
+                                const ids = layerTreeIds(layer.id, wb.layers, wb.groups);
+                                const count = ids.filter((id) =>
+                                  wb.selectedLayerIds.includes(id),
+                                ).length;
+                                input.indeterminate = count > 0 && count < ids.length;
+                              }
+                            }}
                             onChange={() => wb.toggleLayerSelection(layer.id, true)}
                             onClick={(event) => event.stopPropagation()}
                             aria-label={`Select ${layer.name} for batch actions`}
-                            title="Select layer for batch actions"
+                            title="Select this layer and all nested layers for batch actions"
                             className="size-3.5 shrink-0 accent-primary"
                           />
                           <button
@@ -1218,8 +1232,38 @@ export function LayerPanel() {
                               <EyeOff className="size-4" />
                             )}
                           </button>
+                          <button
+                            type="button"
+                            aria-pressed={Boolean(layer.selectionLocked)}
+                            aria-label={
+                              (layer.selectionLocked
+                                ? "Unlock selection for "
+                                : "Lock selection for ") + layer.name
+                            }
+                            title={
+                              layer.selectionLocked
+                                ? "Selection locked — click to unlock"
+                                : "Lock selection (keep layer visible)"
+                            }
+                            className="rounded p-1 text-primary hover:bg-accent"
+                            onClick={() => {
+                              wb.updateLayer(layer.id, { selectionLocked: !layer.selectionLocked });
+                              if (!layer.selectionLocked)
+                                wb.setSelectedFeatures(
+                                  wb.selectedFeatures.filter((item) => item.layerId !== layer.id),
+                                );
+                            }}
+                          >
+                            {layer.selectionLocked ? (
+                              <LockKeyhole className="size-3.5" />
+                            ) : (
+                              <LockKeyholeOpen className="size-3.5 opacity-50" />
+                            )}
+                          </button>
                           <LayerStyleSwatch layer={layer} />
                           <button
+                            data-help={layer.name}
+                            title={layer.name}
                             onClick={(e) =>
                               wb.toggleLayerSelection(layer.id, e.metaKey || e.ctrlKey)
                             }
@@ -1260,7 +1304,7 @@ export function LayerPanel() {
                           )}
                           <button
                             onClick={() => {
-                              if (layer.style.labelTemplate.trim())
+                              if (layer.style.labelUseLayerName || layer.style.labelTemplate.trim())
                                 wb.updateStyle(layer.id, {
                                   labelEnabled: !layer.style.labelEnabled,
                                 });
@@ -1270,14 +1314,14 @@ export function LayerPanel() {
                               }
                             }}
                             aria-label={
-                              layer.style.labelTemplate.trim()
+                              layer.style.labelUseLayerName || layer.style.labelTemplate.trim()
                                 ? layer.style.labelEnabled
                                   ? "Turn labels off"
                                   : "Turn labels on"
                                 : "Set up labels"
                             }
                             title={
-                              layer.style.labelTemplate.trim()
+                              layer.style.labelUseLayerName || layer.style.labelTemplate.trim()
                                 ? layer.style.labelEnabled
                                   ? "Turn labels off"
                                   : "Turn labels on"
@@ -1892,7 +1936,7 @@ export function LayerPanel() {
                                   <button
                                     key={f.id}
                                     onClick={() => {
-                                      void exportLayer(layer.data, layer.name, f.id)
+                                      void exportLayer(layer.data, layer.name, f.id, layer.style)
                                         .then(() => toast.success(`Exported ${f.label}`))
                                         .catch((err: unknown) =>
                                           toast.error(
@@ -2063,10 +2107,23 @@ function LayerChildrenTree({
         <div data-layer-drop-id={layer.id} className="flex min-h-7 items-center gap-1">
           <input
             type="checkbox"
-            checked={selected}
+            checked={
+              selected &&
+              layerTreeIds(layer.id, wb.layers, wb.groups).every((id) =>
+                wb.selectedLayerIds.includes(id),
+              )
+            }
+            ref={(input) => {
+              if (input) {
+                const ids = layerTreeIds(layer.id, wb.layers, wb.groups);
+                const count = ids.filter((id) => wb.selectedLayerIds.includes(id)).length;
+                input.indeterminate = count > 0 && count < ids.length;
+              }
+            }}
             onChange={() => wb.toggleLayerSelection(layer.id, true)}
             onClick={(event) => event.stopPropagation()}
             aria-label={`Select ${layer.name} sublayer`}
+            title="Select this layer and all nested layers for batch actions"
             className="size-3 shrink-0 accent-primary"
           />
           <button
@@ -2092,6 +2149,32 @@ function LayerChildrenTree({
           >
             {layer.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
           </button>
+          <button
+            type="button"
+            aria-pressed={Boolean(layer.selectionLocked)}
+            aria-label={
+              (layer.selectionLocked ? "Unlock selection for " : "Lock selection for ") + layer.name
+            }
+            title={
+              layer.selectionLocked
+                ? "Selection locked — click to unlock"
+                : "Lock selection (keep layer visible)"
+            }
+            className="rounded p-1 text-primary hover:bg-accent"
+            onClick={() => {
+              wb.updateLayer(layer.id, { selectionLocked: !layer.selectionLocked });
+              if (!layer.selectionLocked)
+                wb.setSelectedFeatures(
+                  wb.selectedFeatures.filter((item) => item.layerId !== layer.id),
+                );
+            }}
+          >
+            {layer.selectionLocked ? (
+              <LockKeyhole className="size-3.5" />
+            ) : (
+              <LockKeyholeOpen className="size-3.5 opacity-50" />
+            )}
+          </button>
           <LayerStyleSwatch layer={layer} />
           <button
             type="button"
@@ -2100,6 +2183,7 @@ function LayerChildrenTree({
               const name = window.prompt("Rename sublayer", layer.name)?.trim();
               if (name) wb.updateLayer(layer.id, { name });
             }}
+            data-help={layer.name}
             title={`${layer.name} · Double-click to rename`}
             className="min-w-0 flex-1 truncate text-left text-[10px] font-medium"
           >
@@ -2109,14 +2193,18 @@ function LayerChildrenTree({
           <button
             type="button"
             onClick={() => {
-              if (layer.style.labelTemplate.trim())
+              if (layer.style.labelUseLayerName || layer.style.labelTemplate.trim())
                 wb.updateStyle(layer.id, { labelEnabled: !layer.style.labelEnabled });
               else setStyleFor(layer.id);
             }}
             aria-label={
               layer.style.labelEnabled ? "Turn sublayer labels off" : "Turn sublayer labels on"
             }
-            title={layer.style.labelTemplate.trim() ? "Toggle labels" : "Set up labels in Style"}
+            title={
+              layer.style.labelUseLayerName || layer.style.labelTemplate.trim()
+                ? "Toggle labels"
+                : "Set up labels in Style"
+            }
             className={cn(
               "rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground",
               layer.style.labelEnabled && "bg-primary text-primary-foreground",
@@ -2197,7 +2285,7 @@ function LayerChildrenTree({
                     key={format.id}
                     type="button"
                     onClick={() => {
-                      void exportLayer(layer.data, layer.name, format.id);
+                      void exportLayer(layer.data, layer.name, format.id, layer.style);
                       setExportFor(null);
                     }}
                     className="rounded-md bg-card px-2 py-1 text-[9px] hover:bg-accent"
@@ -2906,6 +2994,25 @@ function GroupStyleEditor({ group, layers }: { group: LayerGroup; layers: GisLay
       <p className="text-[10px] font-semibold">
         Apply to {layers.length} layer{layers.length === 1 ? "" : "s"}
       </p>
+      <label className="block text-[10px] text-muted-foreground">
+        Layer opacity {Math.round(layerOpacity(style) * 100)}%
+        <input
+          aria-label="Every layer opacity"
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={layerOpacity(style)}
+          onChange={(event) =>
+            wb.applyStyleToGroup(group.id, { opacity: Number(event.target.value) })
+          }
+          className="w-full accent-primary"
+        />
+      </label>
+      <p className="text-[9px] text-muted-foreground">
+        Layer opacity affects fills, lines, icons and labels, including colors by attribute. Fill
+        opacity below only affects filled areas.
+      </p>
       <div className="grid grid-cols-2 gap-2">
         <label className="text-[10px] text-muted-foreground">
           Fill
@@ -2958,6 +3065,10 @@ function GroupStyleEditor({ group, layers }: { group: LayerGroup; layers: GisLay
           </button>
         ))}
       </div>
+      <GroupLabelStyleEditor
+        layers={layers}
+        onChange={(patch) => wb.applyStyleToGroup(group.id, patch)}
+      />
     </div>
   );
 }
@@ -3002,7 +3113,7 @@ function LayerStyleSwatch({ layer }: { layer: GisLayer }) {
         style={{
           color: pointIconColor,
           fontSize: Math.max(11, Math.min(18, (layer.style.pointIconSize ?? 18) * 0.72)),
-          opacity: Math.max(0.55, layer.style.fillOpacity),
+          opacity: (layer.style.pointIconOpacity ?? 1) * layerOpacity(layer.style),
         }}
       >
         {pointIcon}
@@ -3020,7 +3131,7 @@ function LayerStyleSwatch({ layer }: { layer: GisLayer }) {
         borderColor: layer.style.strokeColor,
         borderWidth: Math.max(1, Math.min(3, layer.style.strokeWidth)),
         borderStyle: strokePattern,
-        opacity: hasFill ? Math.max(0.45, layer.style.fillOpacity + 0.35) : 1,
+        opacity: (hasFill ? layer.style.fillOpacity : 1) * layerOpacity(layer.style),
       }}
     />
   );
@@ -3069,6 +3180,21 @@ function RemoteLayerSettings({
           <option value={60}>Hourly</option>
         </select>
       </label>
+      <button
+        type="button"
+        disabled={source.loading}
+        onClick={() =>
+          wb.updateDisplayLayer(layerId, {
+            source: { ...source, refreshToken: (source.refreshToken ?? 0) + 1 },
+          })
+        }
+        className="mt-2 flex min-h-11 w-full items-center justify-center rounded-xl border border-border bg-secondary px-3 py-2 text-xs font-semibold text-foreground disabled:opacity-50"
+      >
+        {source.loading ? "Loading visible area…" : "Reload visible area"}
+      </button>
+      {source.loadedFeatures !== undefined && (
+        <p>{source.loadedFeatures.toLocaleString()} features downloaded for this area</p>
+      )}
       {source.lastRefreshedAt && (
         <p>Updated {new Date(source.lastRefreshedAt).toLocaleTimeString()}</p>
       )}

@@ -1,3 +1,5 @@
+import { layerOpacity } from "@/lib/gis/layerOpacity";
+import { pointSymbolOpacity } from "@/lib/gis/iconOpacity";
 import { ChevronRight, Tag, X } from "lucide-react";
 import { useWorkbench } from "@/lib/gis/store";
 import type { FillPattern, GisLayer, LabelPlacement, StrokePattern } from "@/lib/gis/types";
@@ -8,6 +10,7 @@ import {
   propertyKeys,
 } from "@/lib/gis/labels";
 import { cn } from "@/lib/utils";
+import { LegendSwatch } from "./LegendSwatch";
 import { markerIcons } from "@/lib/gis/markerIcons";
 
 const patterns: FillPattern[] = [
@@ -153,7 +156,7 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
       labelFields: unique,
       labelSeparator: nextSeparator,
       labelTemplate: buildLabelTemplate(unique, nextSeparator),
-      labelEnabled: unique.length > 0,
+      labelEnabled: Boolean(s.labelUseLayerName) || unique.length > 0,
     });
   };
 
@@ -186,6 +189,18 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
 
   return (
     <div className="space-y-3 rounded-xl border border-border bg-secondary/40 p-3">
+      <Field label={`Layer opacity ${Math.round(layerOpacity(s) * 100)}%`}>
+        <input
+          aria-label="Layer opacity"
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={layerOpacity(s)}
+          onChange={(event) => wb.updateStyle(layer.id, { opacity: Number(event.target.value) })}
+          className="w-full accent-primary"
+        />
+      </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Fill color">
           <input
@@ -322,13 +337,33 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
           <input
             type="checkbox"
             checked={s.labelEnabled}
-            disabled={!s.labelTemplate.trim()}
+            disabled={!s.labelUseLayerName && !s.labelTemplate.trim()}
             onChange={(event) => wb.updateStyle(layer.id, { labelEnabled: event.target.checked })}
             className="accent-primary"
           />
           <Tag className="size-3.5 text-primary" /> Show labels
         </label>
 
+        <label className="flex items-center gap-2 text-xs font-medium">
+          <input
+            type="checkbox"
+            checked={Boolean(s.labelUseLayerName)}
+            onChange={(event) =>
+              wb.updateStyle(layer.id, {
+                labelUseLayerName: event.target.checked,
+                labelEnabled: event.target.checked || Boolean(s.labelTemplate.trim()),
+              })
+            }
+            className="accent-primary"
+          />
+          Use layer name for each feature
+        </label>
+        {s.labelUseLayerName && (
+          <p className="text-[10px] text-muted-foreground">
+            Each feature shows “{layer.name}”. Attribute choices are kept for when this is
+            unchecked.
+          </p>
+        )}
         <label className="block text-[11px] font-medium text-muted-foreground">
           Label from attribute fields
           <select
@@ -336,6 +371,7 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
             onChange={(event) => {
               if (event.target.value) applyLabelFields([...selectedFields, event.target.value]);
             }}
+            disabled={s.labelUseLayerName}
             aria-label="Add label attribute field"
             className="mt-1 w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs text-foreground"
           >
@@ -508,7 +544,7 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
                 <option value=", ">Comma separator</option>
                 <option value=" — ">Dash separator</option>
                 <option value=" / ">Slash separator</option>
-                <option value="\n">New line</option>
+                <option value={"\n"}>New line</option>
                 <option value=" ">Space</option>
               </select>
             </Field>
@@ -585,9 +621,12 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
             <label className="flex items-center gap-2 text-[10px] font-medium">
               <input
                 type="checkbox"
-                checked={s.labelAllowOverlap}
+                checked={s.labelAllowOverlap ?? false}
                 onChange={(event) =>
-                  wb.updateStyle(layer.id, { labelAllowOverlap: event.target.checked })
+                  wb.updateStyle(layer.id, {
+                    labelAllowOverlap: event.target.checked,
+                    labelCollisionMode: event.target.checked ? "always" : "avoid",
+                  })
                 }
                 className="accent-primary"
               />
@@ -664,7 +703,21 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
               />
             </Field>
           </div>
-          <Field label="Icons by attribute">
+          <Field label={`Icon opacity ${Math.round(pointSymbolOpacity(s) * 100)}%`}>
+            <input
+              aria-label="Icon opacity"
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={pointSymbolOpacity(s)}
+              onChange={(event) =>
+                wb.updateStyle(layer.id, { pointIconOpacity: Number(event.target.value) })
+              }
+              className="w-full accent-primary"
+            />
+          </Field>
+          <Field label="Symbols and patterns by attribute">
             <select
               value={categorizedIcons?.enabled ? categorizedIcons.field : ""}
               onChange={(event) => applyIconField(event.target.value)}
@@ -682,12 +735,62 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
             <details className="group rounded-lg border border-border bg-card/70">
               <summary className="flex cursor-pointer list-none items-center gap-1 px-2 py-1.5 text-[11px] font-medium">
                 <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
-                {categorizedIcons.rules.length} value icons
+                {categorizedIcons.rules.length} value symbols
               </summary>
               <div className="max-h-64 space-y-1 overflow-y-auto border-t border-border p-2">
                 {categorizedIcons.rules.map((rule, index) => (
                   <div key={rule.value} className="flex items-center gap-2">
+                    <LegendSwatch
+                      layer={{
+                        ...layer,
+                        style: {
+                          ...s,
+                          strokePattern: rule.strokePattern ?? s.strokePattern,
+                          fillPattern: rule.fillPattern ?? s.fillPattern,
+                          fillColor:
+                            categorized?.rules.find((r) => r.value === rule.value)?.color ??
+                            s.fillColor,
+                          strokeColor:
+                            categorized?.rules.find((r) => r.value === rule.value)?.color ??
+                            s.strokeColor,
+                          pointIcon: rule.icon,
+                          categorizedIcons: { ...categorizedIcons, enabled: false },
+                        },
+                      }}
+                    />
                     <span className="min-w-0 flex-1 truncate text-[10px]">{rule.label}</span>
+                    {(["strokePattern", "fillPattern"] as const).map((property) => (
+                      <select
+                        key={property}
+                        aria-label={property + " for " + rule.label}
+                        value={rule[property] ?? ""}
+                        onChange={(event) =>
+                          wb.updateStyle(layer.id, {
+                            categorizedIcons: {
+                              ...categorizedIcons,
+                              rules: categorizedIcons.rules.map((item, i) =>
+                                i === index
+                                  ? { ...item, [property]: event.target.value || undefined }
+                                  : item,
+                              ),
+                            },
+                          })
+                        }
+                        className="w-24 rounded border border-border bg-card text-[10px]"
+                      >
+                        <option value="">
+                          Layer {property === "strokePattern" ? "stroke" : "fill"}
+                        </option>
+                        {(property === "strokePattern"
+                          ? strokePatterns.map((p) => p.value)
+                          : patterns
+                        ).map((pattern) => (
+                          <option key={pattern} value={pattern}>
+                            {pattern}
+                          </option>
+                        ))}
+                      </select>
+                    ))}
                     <select
                       value={rule.icon}
                       onChange={(event) =>

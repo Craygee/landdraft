@@ -2,17 +2,10 @@ import { useEffect, useRef } from "react";
 import { fetchRemoteGeoJSONPaged } from "@/lib/gis/arcgis";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { useWorkbench } from "@/lib/gis/store";
+import { isTexasParcelSource } from "@/lib/gis/texasParcels";
+import { canReuseRemoteCoverage, type RemoteCoverage } from "@/lib/gis/remoteCoverage";
 
 type Bbox = [number, number, number, number];
-
-interface Coverage {
-  bbox: Bbox;
-  zoomBucket: number;
-  queryKey: string;
-}
-
-const contains = (outer: Bbox, inner: Bbox) =>
-  outer[0] <= inner[0] && outer[1] <= inner[1] && outer[2] >= inner[2] && outer[3] >= inner[3];
 
 const padBbox = (bbox: Bbox, fraction = 0.06): Bbox => {
   const x = (bbox[2] - bbox[0]) * fraction;
@@ -44,7 +37,8 @@ export function RemoteLayerManager() {
   const layersRef = useRef(wb.displayLayers);
   const updateRef = useRef(wb.updateDisplayLayer);
   const activeRequests = useRef(new Map<string, AbortController>());
-  const coverage = useRef(new Map<string, Coverage>());
+  const coverage = useRef(new Map<string, RemoteCoverage>());
+  const refreshRef = useRef<(() => void) | null>(null);
   layersRef.current = wb.displayLayers;
   updateRef.current = wb.updateDisplayLayer;
   const remoteSignature = wb.displayLayers
@@ -106,13 +100,18 @@ export function RemoteLayerManager() {
           if (!source.refreshMinutes) continue;
           if (now - (source.lastRefreshedAt ?? 0) < source.refreshMinutes * 60_000) continue;
         }
-        const queryKey = `${source.url}|${source.where ?? ""}|${source.outFields?.join(",") ?? "*"}|${source.refreshToken ?? 0}`;
+        const queryKey = `${wb.projectId}|${source.url}|${source.where ?? ""}|${source.outFields?.join(",") ?? "*"}|${source.refreshToken ?? 0}`;
         const previousCoverage = coverage.current.get(layer.id);
         if (
           !scheduledOnly &&
-          previousCoverage?.zoomBucket === zoomBucket &&
-          previousCoverage.queryKey === queryKey &&
-          contains(previousCoverage.bbox, visibleBbox)
+          canReuseRemoteCoverage(
+            previousCoverage,
+            queryKey,
+            zoomBucket,
+            visibleBbox,
+            source,
+            layer.data.features.length,
+          )
         )
           continue;
         requests.get(layer.id)?.abort();
@@ -134,8 +133,12 @@ export function RemoteLayerManager() {
                 bbox: queryBbox,
                 where: source.where,
                 outFields: source.outFields,
-                pageSize: 2_000,
-                maxTotalFeatures: viewportFeatureBudget(mapZoom),
+                pageSize: source.catalogId === "usgs-contours" ? 200 : 2_000,
+                maxTotalFeatures:
+                  isTexasParcelSource(source.url) && mapZoom < 12
+                    ? 4000
+                    : viewportFeatureBudget(mapZoom),
+                parcelDisplayZoom: mapZoom,
                 maxAllowableOffset: tuning.maxAllowableOffset,
                 geometryPrecision: tuning.geometryPrecision,
                 cacheHint: true,
@@ -160,9 +163,18 @@ export function RemoteLayerManager() {
                   });
                 },
               });
-              coverage.current.set(layer.id, { bbox: queryBbox, zoomBucket, queryKey });
+              if (requests.get(layer.id) !== controller || controller.signal.aborted) return;
+              coverage.current.set(layer.id, {
+                bbox: queryBbox,
+                zoomBucket,
+                queryKey,
+                loaded: result.loaded,
+              });
               const finalSource = {
                 ...source,
+                ...(isTexasParcelSource(source.url)
+                  ? { displayDetail: mapZoom < 12 ? ("overview" as const) : ("full" as const) }
+                  : {}),
                 loading: false,
                 loadStatus: result.truncated ? ("zoom-in" as const) : ("complete" as const),
                 loadedFeatures: result.loaded,
@@ -177,7 +189,11 @@ export function RemoteLayerManager() {
               if (!result.truncated) delete finalSource.loadError;
               updateRef.current(layer.id, { data: result.data, source: finalSource });
             } catch (error) {
-              if (!(error instanceof DOMException && error.name === "AbortError")) {
+              if (
+                requests.get(layer.id) === controller &&
+                !controller.signal.aborted &&
+                !(error instanceof DOMException && error.name === "AbortError")
+              ) {
                 updateRef.current(layer.id, {
                   source: {
                     ...source,
@@ -198,6 +214,7 @@ export function RemoteLayerManager() {
       await Promise.all(pending);
     };
 
+    refreshRef.current = () => void refresh(false);
     void refresh(false);
     const onMoveEnd = () => {
       if (timer) clearTimeout(timer);
@@ -206,13 +223,31 @@ export function RemoteLayerManager() {
     map.on("moveend", onMoveEnd);
     const interval = window.setInterval(() => void refresh(true), 60_000);
     return () => {
+      refreshRef.current = null;
       if (timer) clearTimeout(timer);
       window.clearInterval(interval);
       map.off("moveend", onMoveEnd);
       for (const controller of requests.values()) controller.abort();
       requests.clear();
     };
-  }, [map, remoteSignature]);
+  }, [map, remoteSignature, wb.projectId]);
+
+  useEffect(() => {
+    // Project restore strips remote geometry while retaining layer IDs and settings.
+    // Rehydrate immediately even when neither the query nor map extent changed.
+    if (
+      wb.displayLayers.some(
+        (layer) =>
+          layer.visible &&
+          layer.source.kind === "remote" &&
+          layer.source.requiresViewport &&
+          layer.source.lastRefreshedAt === undefined &&
+          layer.source.loadStatus === undefined &&
+          !activeRequests.current.has(layer.id),
+      )
+    )
+      refreshRef.current?.();
+  }, [wb.displayLayers]);
 
   return null;
 }

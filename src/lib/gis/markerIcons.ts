@@ -36,7 +36,7 @@ export const markerIcons: MarkerIconOption[] = [
   { id: "oil", label: "Oil / gas well", symbol: "⊙", category: "Energy" },
   { id: "fuel", label: "Fuel", symbol: "⛽", category: "Energy" },
   { id: "solar", label: "Solar", symbol: "☀", category: "Energy" },
-  { id: "wind", label: "Wind", symbol: "✤", category: "Energy" },
+  { id: "wind", label: "Wind turbine", symbol: "ϒ", category: "Energy" },
 ];
 
 export const defaultMarkerIcon = markerIcons[0]!;

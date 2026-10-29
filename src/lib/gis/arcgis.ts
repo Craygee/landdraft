@@ -56,6 +56,7 @@ export interface RemoteLoadProgress {
 }
 
 export interface PagedRemoteQueryOptions extends RemoteQueryOptions {
+  parcelDisplayZoom?: number | undefined;
   pageSize?: number | undefined;
   maxTotalFeatures?: number | undefined;
   onProgress?: ((progress: RemoteLoadProgress) => void) | undefined;

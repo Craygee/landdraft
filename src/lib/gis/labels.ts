@@ -1,5 +1,5 @@
 import type { GisFeature } from "./types";
-import { squareMeters, meters, AREA_UNITS } from "./measure";
+import { squareMeters, meters, AREA_UNITS } from "./measure.ts";
 
 /**
  * Composes a label from a template such as `{OWNER} · {ACRES} acres`.

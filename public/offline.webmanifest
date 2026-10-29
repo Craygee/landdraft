@@ -1,0 +1,11 @@
+{
+  "id": "/offline.html",
+  "name": "LandDraft Offline Maps",
+  "short_name": "LD Offline",
+  "start_url": "/offline.html",
+  "scope": "/offline.html",
+  "display": "standalone",
+  "background_color": "#f8f6ee",
+  "theme_color": "#216f45",
+  "icons": [{ "src": "/landdraft-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+}

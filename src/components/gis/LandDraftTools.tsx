@@ -54,6 +54,7 @@ export function LandDraftTools() {
     },
     {
       name: "LandDraft AI",
+      edit: true,
       description: "Research, map queries, and project assistance.",
       run: () => setAssistantOpen(true),
     },
@@ -65,7 +66,7 @@ export function LandDraftTools() {
     },
     {
       name: "Map & Report Composer",
-      description: "Create printable maps with legends, scale, and attribution.",
+      description: "Create printable maps with legends and attribution.",
       run: () => setPrintOpen(true),
     },
   ];

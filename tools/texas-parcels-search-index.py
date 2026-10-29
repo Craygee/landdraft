@@ -21,6 +21,8 @@ import pyogrio
 import pyproj
 import shapely
 
+from texas_parcels_schema import REQUIRED_FIELDS, resolve_fields
+
 TEXT_PREFIX_LENGTH = 3
 ID_PREFIX_LENGTH = 5
 LEGAL_PREFIX_LENGTH = 3
@@ -181,13 +183,10 @@ def main():
             west, south = transform.transform(source_bounds[:, 0], source_bounds[:, 1])
             east, north = transform.transform(source_bounds[:, 2], source_bounds[:, 3])
             bounds = np.column_stack((west, south, east, north))
+            source_fields = resolve_fields(table.column_names)
             columns = {
-                name: table[name].to_pylist()
-                for name in [
-                    "OBJECTID", "Prop_ID", "GEO_ID", "OWNER_NAME", "LEGAL_DESC", "SITUS_ADDR",
-                    "SITUS_NUM", "SITUS_STRE", "SITUS_ST_1", "SITUS_ST_2", "SITUS_CITY",
-                    "SITUS_STAT", "SITUS_ZIP", "FIPS", "COUNTY",
-                ]
+                canonical: table[source_fields[canonical]].to_pylist()
+                for canonical in REQUIRED_FIELDS
             }
             for index in range(table.num_rows):
                 row = {name: values[index] for name, values in columns.items()}

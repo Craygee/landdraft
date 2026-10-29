@@ -1,3 +1,4 @@
+import { pointSymbolOpacity } from "./iconOpacity.ts";
 import type { Feature, FeatureCollection } from "geojson";
 
 import { defaultStyle, type LayerStyle } from "./types.ts";
@@ -37,10 +38,20 @@ export function normalizeLayerStyle(value: unknown, seed = 0): LayerStyle {
   const merged = { ...fallback, ...candidate } as LayerStyle;
   return {
     ...merged,
+    pointIconOpacity: pointSymbolOpacity(merged),
     fillColor: typeof merged.fillColor === "string" ? merged.fillColor : fallback.fillColor,
     strokeColor: typeof merged.strokeColor === "string" ? merged.strokeColor : fallback.strokeColor,
     labelTemplate:
-      typeof merged.labelTemplate === "string" ? merged.labelTemplate : fallback.labelTemplate,
+      typeof merged.labelTemplate === "string" && merged.labelTemplate.trim()
+        ? merged.labelTemplate
+        : Array.isArray(merged.labelFields)
+          ? merged.labelFields
+              .filter(
+                (field): field is string => typeof field === "string" && Boolean(field.trim()),
+              )
+              .map((field) => "{" + field + "}")
+              .join(merged.labelSeparator || " · ")
+          : fallback.labelTemplate,
     labelFields: Array.isArray(merged.labelFields)
       ? merged.labelFields.filter((field): field is string => typeof field === "string")
       : [],

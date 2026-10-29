@@ -1,3 +1,8 @@
+import { buildSingleImagePdf, canvasToJpeg } from "./imagePdf";
+import { layoutPrintLegend } from "./printLegendLayout";
+import { downloadFile } from "./export";
+import { svgDataUrl } from "./analysisArtifacts";
+import { toast } from "sonner";
 import type { Map as MlMap } from "maplibre-gl";
 import type { GisLayer, PrintComposition, PrintPaper } from "./types";
 import type { Feature } from "geojson";
@@ -9,9 +14,10 @@ export type MapPaper = PrintPaper;
 export async function createMapSnapshotBlob(
   map: MlMap,
   format: "png" | "pdf" = "pdf",
+  panels: { svg: string }[] = [],
 ): Promise<Blob> {
   const source = map.getCanvas();
-  if (format === "png")
+  if (format === "png" && !panels.length)
     return new Promise<Blob>((resolve, reject) =>
       source.toBlob(
         (value) => (value ? resolve(value) : reject(new Error("Map image could not be created"))),
@@ -20,12 +26,19 @@ export async function createMapSnapshotBlob(
     );
   const canvas = document.createElement("canvas");
   canvas.width = source.width;
-  canvas.height = source.height;
+  const panelHeight = panels.length ? Math.round(source.width * 0.33) : 0;
+  canvas.height = source.height + panelHeight;
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Map PDF canvas is unavailable");
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(source, 0, 0);
+  if (panels.length)
+    await drawAnalysisPanels(context, panels, 0, source.height, canvas.width, panelHeight);
+  if (format === "png")
+    return new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Image unavailable"))), "image/png"),
+    );
   const jpeg = await canvasToJpeg(canvas);
   return buildSingleImagePdf(
     jpeg,
@@ -42,6 +55,7 @@ export async function exportMapPdf(
   layers: GisLayer[],
   paper: MapPaper = "letter",
   orientation: PrintComposition["orientation"] = "landscape",
+  panels: { svg: string }[] = [],
 ) {
   const geometry = printPageGeometry(paper, orientation);
   const page = { width: geometry.widthPixels, height: geometry.heightPixels };
@@ -56,7 +70,8 @@ export async function exportMapPdf(
   const footer = 36;
   const legendWidth = 190;
   const mapWidth = page.width - margin * 2 - legendWidth;
-  const mapHeight = page.height - margin * 2 - header - footer;
+  const panelHeight = panels.length ? Math.round(page.height * 0.26) : 0;
+  const mapHeight = page.height - margin * 2 - header - footer - panelHeight;
 
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, page.width, page.height);
@@ -75,19 +90,27 @@ export async function exportMapPdf(
   ctx.strokeStyle = "#9ba59e";
   ctx.strokeRect(margin, margin + header, mapWidth, mapHeight);
 
-  let y = margin + header + 14;
-  const legendX = margin + mapWidth + 22;
+  ctx.font = "10px Arial, sans-serif";
+  const legendLayers = layers.filter((item) => item.visible);
+  const legend = layoutPrintLegend(
+    legendLayers.map((layer) => layer.name),
+    legendWidth - 24,
+    mapHeight,
+    (text) => ctx.measureText(text).width,
+  );
+  ctx.save();
+  ctx.translate(margin + mapWidth + 12, margin + header);
+  ctx.scale(legend.scale, legend.scale);
   ctx.fillStyle = "#17251b";
-  ctx.font = "700 15px Arial, sans-serif";
-  ctx.fillText("Visible layers", legendX, y);
-  y += 24;
-  ctx.font = "12px Arial, sans-serif";
-  for (const layer of layers.filter((item) => item.visible).slice(0, 22)) {
-    drawLegendSwatch(ctx, layer, legendX, y - 12, 26, 14);
+  ctx.font = "700 12px Arial, sans-serif";
+  ctx.fillText("Legend", 8, 18);
+  ctx.font = "10px Arial, sans-serif";
+  legend.entries.forEach((entry, i) => {
+    drawLegendSwatch(ctx, legendLayers[i]!, entry.x, entry.y, 30, 16);
     ctx.fillStyle = "#27332b";
-    ctx.fillText(ellipsize(layer.name, 22), legendX + 34, y);
-    y += 22;
-  }
+    entry.lines.forEach((line, j) => ctx.fillText(line, entry.x + 34, entry.y + 10 + j * 13));
+  });
+  ctx.restore();
 
   ctx.fillStyle = "#6a746d";
   ctx.font = "10px Arial, sans-serif";
@@ -97,6 +120,15 @@ export async function exportMapPdf(
     page.height - margin + 5,
   );
 
+  if (panels.length)
+    await drawAnalysisPanels(
+      ctx,
+      panels,
+      margin,
+      margin + header + mapHeight,
+      page.width - margin * 2,
+      panelHeight,
+    );
   const jpeg = await canvasToJpeg(canvas);
   const blob = buildSingleImagePdf(
     jpeg,
@@ -109,8 +141,19 @@ export async function exportMapPdf(
   const link = document.createElement("a");
   link.href = url;
   link.download = `${(projectName || "map").replace(/[^a-z0-9_-]+/gi, "_")}_${paper}_${orientation}.pdf`;
+  document.body.appendChild(link);
   link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  link.remove();
+  toast("PDF ready", {
+    duration: 30000,
+    action: {
+      label: "Open PDF",
+      onClick: () => {
+        window.open(url, "_blank", "noopener,noreferrer");
+      },
+    },
+  });
+  setTimeout(() => URL.revokeObjectURL(url), 300000);
 }
 
 export async function exportAnalysisReportPdf(
@@ -259,7 +302,7 @@ function drawLegendSwatch(
   if (symbol.kind === "point") {
     if (symbol.markerIcon) {
       ctx.fillStyle = symbol.markerColor;
-      ctx.globalAlpha = 1;
+      ctx.globalAlpha = symbol.markerOpacity;
       ctx.font = `${Math.max(9, Math.min(14, symbol.markerSize * 0.7))}px Arial, sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -268,10 +311,10 @@ function drawLegendSwatch(
       const radius = Math.max(3, Math.min(height / 2 - 2, symbol.markerSize / 2));
       ctx.beginPath();
       ctx.arc(x + width / 2, centerY, radius, 0, Math.PI * 2);
-      ctx.globalAlpha = Math.max(0.35, symbol.fillOpacity);
+      ctx.globalAlpha = Math.max(0.35, symbol.fillOpacity) * symbol.markerOpacity;
       ctx.fillStyle = symbol.fillColor;
       ctx.fill();
-      ctx.globalAlpha = symbol.strokeOpacity;
+      ctx.globalAlpha = symbol.strokeOpacity * symbol.markerOpacity;
       ctx.strokeStyle = symbol.strokeColor;
       ctx.stroke();
     }
@@ -283,7 +326,7 @@ function drawLegendSwatch(
     ctx.globalAlpha = 0.35;
     ctx.fillStyle = symbol.fillColor;
     ctx.fillRect(x + 3, y + 3, width - 6, height - 6);
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = symbol.markerOpacity;
     ctx.strokeStyle = symbol.strokeColor;
     ctx.beginPath();
     ctx.moveTo(x + 3, y + height - 3);
@@ -416,60 +459,51 @@ function drawWrappedText(
 const ellipsize = (value: string, max: number) =>
   value.length > max ? `${value.slice(0, Math.max(1, max - 1))}…` : value;
 
-async function canvasToJpeg(canvas: HTMLCanvasElement): Promise<Uint8Array> {
-  const blob = await new Promise<Blob>((resolve, reject) =>
-    canvas.toBlob(
-      (value) => (value ? resolve(value) : reject(new Error("Map image could not be created"))),
-      "image/jpeg",
-      0.92,
+async function drawAnalysisPanels(
+  ctx: CanvasRenderingContext2D,
+  panels: { svg: string }[],
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  const images = await Promise.all(
+    panels.map(
+      (p) =>
+        new Promise<HTMLImageElement>((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = () => reject(new Error("Analysis graphic could not be rendered"));
+          image.src = svgDataUrl(p.svg);
+        }),
     ),
   );
-  return new Uint8Array(await blob.arrayBuffer());
+  images.forEach((image, i) => {
+    const cell = width / images.length,
+      scale = Math.min((cell - 12) / image.width, (height - 12) / image.height),
+      w = image.width * scale,
+      h = image.height * scale;
+    ctx.drawImage(image, x + i * cell + (cell - w) / 2, y + (height - h) / 2, w, h);
+  });
 }
-
-/** Minimal standards-compliant one-page PDF containing the composed JPEG map sheet. */
-function buildSingleImagePdf(
-  jpeg: Uint8Array,
-  imageWidth: number,
-  imageHeight: number,
-  pageWidth = imageWidth,
-  pageHeight = imageHeight,
-): Blob {
-  const encoder = new TextEncoder();
-  const chunks: Uint8Array[] = [];
-  const offsets: number[] = [0];
-  let length = 0;
-  const push = (value: string | Uint8Array) => {
-    const bytes = typeof value === "string" ? encoder.encode(value) : value;
-    chunks.push(bytes);
-    length += bytes.length;
-  };
-  const object = (id: number, body: string | Uint8Array, suffix = "") => {
-    offsets[id] = length;
-    push(`${id} 0 obj\n`);
-    push(body);
-    push(`${suffix}\nendobj\n`);
-  };
-
-  push("%PDF-1.4\n%âãÏÓ\n");
-  object(1, "<< /Type /Catalog /Pages 2 0 R >>");
-  object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
-  object(
-    3,
-    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Map 4 0 R >> >> /Contents 5 0 R >>`,
+export async function exportSvgReportPdf(svg: string, name: string) {
+  const page = printPageGeometry("letter", "landscape"),
+    canvas = document.createElement("canvas");
+  canvas.width = page.widthPixels;
+  canvas.height = page.heightPixels;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("PDF canvas unavailable");
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await drawAnalysisPanels(ctx, [{ svg }], 24, 24, canvas.width - 48, canvas.height - 48);
+  downloadFile(
+    buildSingleImagePdf(
+      await canvasToJpeg(canvas),
+      canvas.width,
+      canvas.height,
+      page.widthPoints,
+      page.heightPoints,
+    ),
+    `${name.replace(/[^a-z0-9_-]+/gi, "_")}.pdf`,
   );
-  offsets[4] = length;
-  push(
-    `4 0 obj\n<< /Type /XObject /Subtype /Image /Width ${imageWidth} /Height ${imageHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`,
-  );
-  push(jpeg);
-  push("\nendstream\nendobj\n");
-  const content = `q ${pageWidth} 0 0 ${pageHeight} 0 0 cm /Map Do Q`;
-  object(5, `<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
-  const xref = length;
-  push("xref\n0 6\n0000000000 65535 f \n");
-  for (let id = 1; id <= 5; id += 1)
-    push(`${String(offsets[id] ?? 0).padStart(10, "0")} 00000 n \n`);
-  push(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
-  return new Blob(chunks as BlobPart[], { type: "application/pdf" });
 }

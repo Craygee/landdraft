@@ -75,6 +75,7 @@ export function DrawToolbar() {
       { enableHighAccuracy: true, timeout: 15000 },
     );
   };
+  if (!wb.canEditProject) return null;
   return (
     <div className="float-surface flex items-center gap-1 rounded-2xl p-1.5">
       <div className="flex items-center gap-1">

@@ -1,3 +1,4 @@
+import { NEW_SHARE_PERMISSIONS, type SharePermissions } from "@/lib/gis/sharePermissions";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { bbox as turfBbox } from "@turf/turf";
 import {
@@ -164,6 +165,10 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
   );
   const [selectedOnly, setSelectedOnly] = useState<Record<string, boolean>>({});
   const [managedShareId, setManagedShareId] = useState<string | null>(null);
+  const [permissions, setPermissions] = useState<SharePermissions>({ ...NEW_SHARE_PERMISSIONS });
+  const [managedPermissions, setManagedPermissions] = useState<SharePermissions>({
+    ...NEW_SHARE_PERMISSIONS,
+  });
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<ShareRole>("viewer");
 
@@ -237,7 +242,13 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
     try {
       await wb.saveProject("manual");
       const mapView = shareViewForScope(map, wb.mapView, scope, wb.layers);
-      const projectState = scopedShareState(wb.toProjectState(), wb.layers, scope, mapView);
+      const projectState = scopedShareState(
+        wb.toProjectState(),
+        wb.layers,
+        scope,
+        mapView,
+        permissions,
+      );
       const share = await shareStore.create({
         userId,
         projectId: wb.projectId,
@@ -245,6 +256,7 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
         state: projectState,
         mapView,
         layerScope: scope,
+        permissions,
       });
       await refresh();
       setManagedShareId(share.id);
@@ -263,6 +275,10 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
   };
 
   const updateShare = async (share: MapShare) => {
+    if (share.projectId !== wb.projectId) {
+      toast.error("Open the source project before updating its shared layers.");
+      return;
+    }
     const userId = auth.user?.id;
     if (!userId) return;
     const scope = currentScope();
@@ -276,10 +292,11 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
       await shareStore.updateSnapshot({
         share,
         userId,
-        state: scopedShareState(wb.toProjectState(), wb.layers, scope, mapView),
+        state: scopedShareState(wb.toProjectState(), wb.layers, scope, mapView, managedPermissions),
         mapView,
         layerScope: scope,
         name: shareName,
+        permissions: managedPermissions,
       });
       await refresh();
       toast.success("Shared map updated", {
@@ -295,6 +312,26 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
   };
 
   const managedShare = data.shares.find((share) => share.id === managedShareId) ?? null;
+  useEffect(() => {
+    if (managedShare) setManagedPermissions(managedShare.permissions);
+  }, [managedShare]);
+  const savePermissions = async () => {
+    if (!managedShare || !auth.user) return;
+    setBusy(true);
+    try {
+      await shareStore.updatePermissions({
+        share: managedShare,
+        userId: auth.user.id,
+        permissions: managedPermissions,
+      });
+      await refresh();
+      toast.success("Sharing options saved");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Sharing options could not be saved");
+    } finally {
+      setBusy(false);
+    }
+  };
   const managedMembers = data.members.filter((member) => member.shareId === managedShareId);
   const managedSubmissions = data.submissions.filter(
     (submission) => submission.shareId === managedShareId,
@@ -506,6 +543,7 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
                 </div>
               </section>
 
+              <SharingOptions value={permissions} onChange={setPermissions} />
               <button
                 onClick={() => void createShare()}
                 disabled={busy}
@@ -631,6 +669,19 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
                 </button>
               </div>
 
+              <SharingOptions value={managedPermissions} onChange={setManagedPermissions} />
+              <button
+                disabled={busy}
+                onClick={() => void savePermissions()}
+                className="w-full rounded-lg bg-primary px-3 py-2 font-semibold text-primary-foreground disabled:opacity-50"
+              >
+                Save sharing options
+              </button>
+              <p className="text-[10px] text-muted-foreground">
+                Applies to recipients of this shared map. Saving updates permission settings and
+                included notes; existing shared feature geometry stays unchanged. Owners and
+                administrators retain full access.
+              </p>
               <div className="grid grid-cols-[1fr_105px_auto] gap-1">
                 <input
                   type="email"
@@ -897,5 +948,42 @@ function Tab({ active, label, onClick }: { active: boolean; label: string; onCli
     >
       {label}
     </button>
+  );
+}
+
+function SharingOptions({
+  value,
+  onChange,
+}: {
+  value: SharePermissions;
+  onChange: (value: SharePermissions) => void;
+}) {
+  return (
+    <section
+      className="space-y-2 rounded-xl border border-border p-3"
+      aria-label="Shared map permissions"
+    >
+      <h3 className="font-semibold">Recipient permissions</h3>
+      <label className="flex min-h-9 items-center gap-2">
+        <input
+          type="checkbox"
+          checked={value.allowExport}
+          onChange={(e) => onChange({ ...value, allowExport: e.target.checked })}
+        />
+        Allow export of active layers
+      </label>
+      <label className="flex min-h-9 items-center gap-2">
+        <input
+          type="checkbox"
+          checked={value.allowNotes}
+          onChange={(e) => onChange({ ...value, allowNotes: e.target.checked })}
+        />
+        Allow viewing project and shared-layer notes
+      </label>
+      <p className="text-[10px] text-muted-foreground">
+        Viewers cannot draw, use AI or map search, or download a project backup. Notes are read only
+        for viewers. Map printing remains available.
+      </p>
+    </section>
   );
 }

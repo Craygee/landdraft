@@ -1,5 +1,6 @@
 import type { FeatureCollection } from "geojson";
 import type { PagedRemoteQueryOptions, RemoteLoadProgress } from "./arcgis";
+import { parcelScreenArea } from "./parcelDisplay.ts";
 
 export const TEXAS_PARCEL_URL =
   "https://landdraft-public-parcels.tight-sky-0ae1.workers.dev/texas/current.json";
@@ -59,7 +60,8 @@ export async function fetchTexasParcels(
   const b = opts.bbox;
   if (!b || !b.every(Number.isFinite) || b[0] >= b[2] || b[1] >= b[3])
     throw new Error("Zoom to a valid map area to load Texas parcels.");
-  if ((b[2] - b[0]) * (b[3] - b[1]) > 2)
+  const overview = opts.parcelDisplayZoom !== undefined && opts.parcelDisplayZoom < 12;
+  if ((b[2] - b[0]) * (b[3] - b[1]) > (overview ? 32 : 2))
     throw new Error(
       "All available Texas parcels are stored centrally. Zoom in to display parcel boundaries.",
     );
@@ -75,6 +77,8 @@ export async function fetchTexasParcels(
   const features: FeatureCollection["features"] = [];
   const max = Math.max(1, Math.min(opts.maxTotalFeatures ?? opts.maxFeatures ?? 20000, 40000));
   let truncated = false;
+  const scanLimit = overview ? 12000 : Infinity;
+  let scanned = 0;
   const checkAbort = () => {
     if (opts.signal?.aborted) throw new DOMException("Request aborted", "AbortError");
   };
@@ -95,12 +99,23 @@ export async function fetchTexasParcels(
         maxY: b[3],
       })) {
         checkAbort();
+        if (truncated) break;
+        if (++scanned > scanLimit) {
+          truncated = true;
+          break;
+        }
         const properties = feature.properties ?? {};
         if (
           county &&
           String(
             properties["COUNTY"] ?? properties["county"] ?? properties["CNTY_NM"] ?? "",
           ).toLowerCase() !== county.toLowerCase()
+        )
+          continue;
+        if (
+          overview &&
+          parcelScreenArea(feature, opts.parcelDisplayZoom!) <
+            (opts.parcelDisplayZoom! < 11 ? 8 : 4)
         )
           continue;
         if (features.length >= max) {
@@ -126,6 +141,11 @@ export async function fetchTexasParcels(
   // Bound concurrency so scattered source batches do not serialize dozens of round trips.
   await Promise.all(Array.from({ length: Math.min(4, parts.length) }, readParts));
   checkAbort();
+  if (overview)
+    features.sort(
+      (a, b) =>
+        parcelScreenArea(b, opts.parcelDisplayZoom!) - parcelScreenArea(a, opts.parcelDisplayZoom!),
+    );
   const result = {
     data: { type: "FeatureCollection" as const, features },
     loaded: features.length,

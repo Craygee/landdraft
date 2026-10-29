@@ -42,6 +42,7 @@ import { ProjectAreaControl } from "./ProjectAreaControl";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { LandDraftTools } from "./LandDraftTools";
 import { ButtonHelpSettings } from "@/components/ui/ButtonHelpSettings";
+import { PublicDataAccountSettings } from "./PublicDataAccountControls";
 
 export function TopBar({
   onTogglePanel,
@@ -99,22 +100,24 @@ export function TopBar({
         <PanelLeft className="size-4" />
       </button>
 
-      <button
-        onClick={() => {
-          window.sessionStorage.removeItem("landdraft.force-desktop.v1");
-          window.localStorage.setItem("landdraft.mobile-mode.v1", "field");
-          const params = new URLSearchParams(window.location.search);
-          params.delete("desktop");
-          window.location.assign(
-            `/mobile${params.size ? `?${params}` : ""}${window.location.hash}`,
-          );
-        }}
-        aria-label="Open field notes view"
-        title="Open the streamlined field notes and GPS view"
-        className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-secondary text-secondary-foreground transition-colors hover:bg-accent"
-      >
-        <Navigation className="size-4" />
-      </button>
+      {wb.canEditProject && (
+        <button
+          onClick={() => {
+            window.sessionStorage.removeItem("landdraft.force-desktop.v1");
+            window.localStorage.setItem("landdraft.mobile-mode.v1", "field");
+            const params = new URLSearchParams(window.location.search);
+            params.delete("desktop");
+            window.location.assign(
+              `/mobile${params.size ? `?${params}` : ""}${window.location.hash}`,
+            );
+          }}
+          aria-label="Open field notes view"
+          title="Open the streamlined field notes and GPS view"
+          className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-secondary text-secondary-foreground transition-colors hover:bg-accent"
+        >
+          <Navigation className="size-4" />
+        </button>
+      )}
 
       <div className="flex shrink-0 items-center gap-2">
         <span className="flex size-8 items-center justify-center rounded-xl bg-primary text-primary-foreground">
@@ -150,14 +153,16 @@ export function TopBar({
       <ProjectAreaControl />
 
       <div className="ml-auto hidden items-center gap-1 min-[1480px]:flex">
-        <BarBtn
-          icon={<Sparkles className="size-4" />}
-          label="AI"
-          help="Ask LandDraft AI to search, select, explain, or report"
-          onClick={() => setAssistantOpen(!assistantOpen)}
-          primary
-          tourId="top-ai"
-        />
+        {wb.canUseAi && (
+          <BarBtn
+            icon={<Sparkles className="size-4" />}
+            label="AI"
+            help="Ask LandDraft AI to search, select, explain, or report"
+            onClick={() => setAssistantOpen(!assistantOpen)}
+            primary
+            tourId="top-ai"
+          />
+        )}
         {wb.canEditProject && (
           <BarBtn
             icon={<Database className="size-4" />}
@@ -187,7 +192,7 @@ export function TopBar({
           <BarBtn
             icon={<Beaker className="size-4" />}
             label="Analysis"
-            help="Create buffers, centroids, intersections and other derived layers"
+            help="Elevation profiles, buffers, centroids, intersections and other derived layers"
             onClick={() => setAnalysisOpen(!analysisOpen)}
             tourId="top-analysis"
           />
@@ -234,7 +239,7 @@ export function TopBar({
             tourId="top-projects"
           />
         )}
-        {wb.canEditProject && (
+        {wb.canViewNotes && (
           <BarBtn
             icon={<NotebookTabs className="size-4" />}
             label="Records"
@@ -246,17 +251,19 @@ export function TopBar({
       </div>
 
       <div className="ml-auto flex items-center gap-1 min-[1480px]:hidden">
-        <BarBtn
-          icon={<Sparkles className="size-4" />}
-          label="AI"
-          help="Ask LandDraft AI to search, select, explain, or report"
-          onClick={() => {
-            closeCompactMenus();
-            setAssistantOpen(!assistantOpen);
-          }}
-          primary
-          tourId="top-ai"
-        />
+        {wb.canUseAi && (
+          <BarBtn
+            icon={<Sparkles className="size-4" />}
+            label="AI"
+            help="Ask LandDraft AI to search, select, explain, or report"
+            onClick={() => {
+              closeCompactMenus();
+              setAssistantOpen(!assistantOpen);
+            }}
+            primary
+            tourId="top-ai"
+          />
+        )}
         <MenuBarButton
           icon={<LayoutGrid className="size-4" />}
           label="Modules"
@@ -330,13 +337,13 @@ export function TopBar({
         </span>
       )}
 
-      {showProjects && (
+      {showProjects && wb.canEditProject && (
         <div className="float-surface absolute right-2 top-14 rounded-2xl">
           <ProjectMenu onClose={() => setShowProjects(false)} />
         </div>
       )}
 
-      {showExport && (
+      {showExport && wb.canExportLayers && (
         <div className="float-surface absolute right-2 top-14 w-80 rounded-2xl">
           <ExportPanel onDone={() => setShowExport(false)} />
         </div>
@@ -371,7 +378,7 @@ export function TopBar({
             <MenuAction
               icon={<Beaker className="size-4" />}
               label="Spatial analysis"
-              help="Buffers, intersections, centroids, and derived layers"
+              help="Elevation profiles, buffers, intersections, centroids, and derived layers"
               onClick={() => {
                 closeCompactMenus();
                 setAnalysisOpen(!analysisOpen);
@@ -471,7 +478,7 @@ export function TopBar({
               }}
             />
           )}
-          {wb.canEditProject && (
+          {wb.canViewNotes && (
             <MenuAction
               icon={<NotebookTabs className="size-4" />}
               label="Records & files"
@@ -482,7 +489,7 @@ export function TopBar({
               }}
             />
           )}
-          {wb.canEditProject && (
+          {wb.canExportLayers && (
             <MenuAction
               icon={<FileDown className="size-4" />}
               label="Export GIS data"
@@ -562,6 +569,9 @@ export function TopBar({
 
           <div className="mt-3">
             <ButtonHelpSettings compact />
+            <div className="mt-3">
+              <PublicDataAccountSettings />
+            </div>
           </div>
 
           <button

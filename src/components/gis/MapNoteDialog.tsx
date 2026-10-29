@@ -106,7 +106,7 @@ export function MapNoteDialog() {
     setFiles([]);
   }, [location]);
 
-  if (!location) return null;
+  if (!location || !wb.canEditProject) return null;
 
   const close = () => setPendingMapNoteLocation(null);
 
