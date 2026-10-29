@@ -30,7 +30,7 @@ The following describes the older preview environment, not the current shared te
 
 - Hosting target: the isolated Cloudflare Worker named `landdraft-preview`.
 - Public test URL: `https://landdraft-preview.tight-sky-0ae1.workers.dev/`.
-- Source repository: `Craygee/terrasketch-gis`.
+- Source repository: `Craygee/landdraft`.
 - Allowed deployment branch: `feature/test-module-development` only.
 - Build command: `bun install --frozen-lockfile && bun run build && node scripts/prepare-preview-worker.mjs`.
 - Deploy command: `npx wrangler deploy --config .output/server/wrangler.json`.
