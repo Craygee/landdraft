@@ -72,6 +72,44 @@ test("a survey point overrides DEM only within its influence range, tapering to 
   assert.equal(far.elevationProvenance, "provider");
 });
 
+test("duplicate controls at one station resolve to one newest authoritative station", () => {
+  const base = demRoute();
+  const stationM = base.stations[10]!.stationM;
+  const older = {
+    ...createControlPoint({
+      route: base,
+      stationM,
+      groundElevationM: 104,
+      influenceRangeM: 20,
+      sourceKind: "survey",
+      source: "Older survey",
+    }),
+    capturedAt: 1,
+  };
+  const correction = {
+    ...createControlPoint({
+      route: base,
+      stationM,
+      groundElevationM: 106,
+      influenceRangeM: 20,
+      sourceKind: "survey",
+      source: "Corrected survey",
+    }),
+    capturedAt: 2,
+  };
+  const resolved = resolveRouteElevations({
+    ...base,
+    controlPoints: [older, correction],
+  });
+  assert.deepEqual(resolved.appliedControlIds, [correction.id]);
+  assert.deepEqual(resolved.supersededControlIds, [older.id]);
+  const atStation = resolved.route.stations.filter(
+    (station) => Math.abs(station.stationM - stationM) < 1e-6,
+  );
+  assert.equal(atStation.length, 1);
+  assert.equal(atStation[0]!.groundElevationM, 106);
+});
+
 test("control points survive a geometry edit and are dropped from use only when off-route", () => {
   const base = demRoute();
   const control = createControlPoint({

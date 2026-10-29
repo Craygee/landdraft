@@ -6,12 +6,21 @@ import type { ElevationSample, PipelineRoute, PipelineStation } from "./types.ts
 /** A control point farther than this from the edited centerline is kept but not applied. */
 export const SURVEY_MAX_OFFSET_M = 10;
 export const DEFAULT_SURVEY_INFLUENCE_M = 30;
+export const CONTROL_STATION_TOLERANCE_M = 0.01;
 
 export interface ElevationResolution {
   route: PipelineRoute;
   appliedControlIds: string[];
   /** Control points stored on the route that no longer lie on it after a geometry edit. */
   offRouteControlIds: string[];
+  /** Older/lower-priority controls at the same resolved station that were not applied. */
+  supersededControlIds: string[];
+}
+
+function preferredControl(a: ElevationSample, b: ElevationSample): ElevationSample {
+  if (a.capturedAt !== b.capturedAt) return a.capturedAt > b.capturedAt ? a : b;
+  if (a.sourceKind !== b.sourceKind) return a.sourceKind === "survey" ? a : b;
+  return a.id.localeCompare(b.id) >= 0 ? a : b;
 }
 
 export function createControlPoint(input: {
@@ -72,18 +81,35 @@ export function resolveRouteElevations(route: PipelineRoute): ElevationResolutio
     .sort((a, b) => a.stationM - b.stationM);
   const appliedControlIds: string[] = [];
   const offRouteControlIds: string[] = [];
-  const controls = (route.controlPoints ?? [])
+  const supersededControlIds: string[] = [];
+  const projectedControls = (route.controlPoints ?? [])
     .map((control) => {
       const projected = projectOntoRoute(route, control.coordinate);
       if (projected.offsetM > SURVEY_MAX_OFFSET_M) {
         offRouteControlIds.push(control.id);
         return undefined;
       }
-      appliedControlIds.push(control.id);
       return { ...control, stationM: projected.stationM };
     })
     .filter((control): control is ElevationSample => control !== undefined)
     .sort((a, b) => a.stationM - b.stationM);
+  const controls: ElevationSample[] = [];
+  for (const control of projectedControls) {
+    const existingIndex = controls.findIndex(
+      (existing) => Math.abs(existing.stationM - control.stationM) <= CONTROL_STATION_TOLERANCE_M,
+    );
+    if (existingIndex < 0) {
+      controls.push(control);
+      continue;
+    }
+    const existing = controls[existingIndex]!;
+    const winner = preferredControl(existing, control);
+    const loser = winner.id === existing.id ? control : existing;
+    supersededControlIds.push(loser.id);
+    controls[existingIndex] = winner;
+  }
+  controls.sort((a, b) => a.stationM - b.stationM);
+  appliedControlIds.push(...controls.map((control) => control.id));
 
   const burialDepthM = Math.max(0, route.burialDepthM ?? 0);
   const baseStations = route.stations.filter((station) => !station.controlPointId);
@@ -166,5 +192,6 @@ export function resolveRouteElevations(route: PipelineRoute): ElevationResolutio
     route: { ...route, stations },
     appliedControlIds,
     offRouteControlIds,
+    supersededControlIds,
   };
 }

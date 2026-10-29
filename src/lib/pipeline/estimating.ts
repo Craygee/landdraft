@@ -9,6 +9,7 @@ import type {
   EstimateLine,
   PipeSpecification,
   PipelineComponent,
+  PipelineEngineeringState,
   PipelineEstimateSummary,
   PipelineRoute,
   PipelineScenario,
@@ -267,6 +268,19 @@ export function currentRate(
     .sort((a, b) => b.retrievedAt - a.retrievedAt)[0];
 }
 
+/** Reprices the current scenario immediately when estimate-only assumptions change. */
+export function recalculateScenarioEstimate(
+  state: PipelineEngineeringState,
+  scenario: PipelineScenario,
+): PipelineEstimateSummary | undefined {
+  const route = state.routes.find((item) => item.id === scenario.routeId);
+  if (!route) return undefined;
+  const takeoff = state.quantitySnapshots.find(
+    (item) => item.scenarioId === scenario.id && item.geometryRevision === route.geometryRevision,
+  );
+  return calculatePreliminaryEstimate(route, scenario, takeoff, state.priceSnapshots);
+}
+
 /**
  * The estimate is a ledger: one line per takeoff quantity × its current rate snapshot, followed by
  * contingency and markup rows. A quantity without a rate stays unpriced (never $0). The scenario's
@@ -351,6 +365,13 @@ export function calculatePreliminaryEstimate(
 
   const materialLine = lines.find((line) => line.rateKey?.startsWith("pipe:"));
   const warnings: string[] = [];
+  const rangesNeedingReview = route.constructionRanges.filter(
+    (range) => range.placementReview,
+  ).length;
+  if (rangesNeedingReview)
+    warnings.push(
+      `${rangesNeedingReview} construction range${rangesNeedingReview === 1 ? " requires" : "s require"} confirmation after a route edit. Quantities remain preliminary until reviewed.`,
+    );
   if (unpricedCount)
     warnings.push(
       `${unpricedCount} quantit${unpricedCount === 1 ? "y has" : "ies have"} no rate and are excluded from the total.`,

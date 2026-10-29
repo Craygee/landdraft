@@ -1,4 +1,4 @@
-import type { Geometry, Position } from "geojson";
+import type { Feature, Geometry, Position } from "geojson";
 import type {
   FacilityTag,
   LandFacilityPermission,
@@ -14,6 +14,41 @@ export const FACILITY_TAG_LABELS: Record<FacilityTag, string> = {
   meter: "Meter allowed",
   aboveground: "Aboveground facility allowed",
 };
+
+export function geometryFingerprint(geometry: Geometry): string {
+  const source =
+    geometry.type === "GeometryCollection"
+      ? JSON.stringify([geometry.type, geometry.geometries])
+      : JSON.stringify([geometry.type, geometry.coordinates]);
+  let hash = 0;
+  for (let index = 0; index < source.length; index += 1)
+    hash = (Math.imul(hash, 31) + source.charCodeAt(index)) | 0;
+  return `${geometry.type}-${(hash >>> 0).toString(36)}`;
+}
+
+/** Resolves a saved land rule without trusting a mutable array index. */
+export function resolveLandPermissionGeometry(
+  permission: LandFacilityPermission,
+  features: Feature[],
+): Geometry | undefined {
+  if (permission.featureId !== undefined) {
+    const byId = features.find(
+      (feature) => feature.id !== undefined && String(feature.id) === permission.featureId,
+    );
+    if (byId?.geometry) return byId.geometry;
+  }
+  if (permission.geometryHash !== undefined) {
+    const indexed = features[permission.featureIndex];
+    if (indexed?.geometry && geometryFingerprint(indexed.geometry) === permission.geometryHash)
+      return indexed.geometry;
+    return features.find(
+      (feature) =>
+        feature.geometry && geometryFingerprint(feature.geometry) === permission.geometryHash,
+    )?.geometry;
+  }
+  // Index-only legacy records cannot be proven safe after feature edits; force reconnection.
+  return undefined;
+}
 
 /**
  * The siting class of a component. Buried inline items (valves, sensors, CP test stations) carry
@@ -88,11 +123,24 @@ export function facilitySitingFindings(
   geometryFor: (permission: LandFacilityPermission) => Geometry | null | undefined,
 ): SolverFinding[] {
   const findings: SolverFinding[] = [];
+  const resolvedPermissions = permissions.flatMap((permission) => {
+    const geometry = geometryFor(permission);
+    if (geometry) return [{ permission, geometry }];
+    findings.push({
+      id: `SITING_REFERENCE_${permission.id}`,
+      severity: "blocker",
+      code: "FACILITY_SITING_REFERENCE_MISSING",
+      title: `Land rule cannot resolve ${permission.label}`,
+      detail:
+        "The referenced polygon was removed or changed. Reconnect this rule before relying on facility siting.",
+    });
+    return [];
+  });
   for (const component of components) {
     const tag = facilityTagForComponent(component.kind);
     if (!tag) continue;
-    for (const permission of permissions) {
-      if (!pointInGeometry(component.coordinate, geometryFor(permission))) continue;
+    for (const { permission, geometry } of resolvedPermissions) {
+      if (!pointInGeometry(component.coordinate, geometry)) continue;
       // Each class needs its own tag: "aboveground" does not imply pumps or compressors.
       if (!permission.noFacilities && permission.allowed.includes(tag)) continue;
       findings.push({

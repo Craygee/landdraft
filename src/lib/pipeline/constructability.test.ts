@@ -6,6 +6,7 @@ import {
   createConstructionRange,
   createManualCrossing,
   estimateRockQuantity,
+  reprojectConstructionRanges,
   reprojectCrossings,
   resolveConstructionIntervals,
   trenchDepthM,
@@ -14,13 +15,19 @@ import {
   buildPreliminaryTakeoff,
   calculatePreliminaryEstimate,
   currentRate,
+  recalculateScenarioEstimate,
 } from "./estimating.ts";
 import {
   SYSTEM_PIPE_SPECIFICATIONS,
   createDefaultScenario,
+  emptyPipelineEngineeringState,
   routeFromLineFeature,
 } from "./model.ts";
-import { facilitySitingFindings } from "./siting.ts";
+import {
+  facilitySitingFindings,
+  geometryFingerprint,
+  resolveLandPermissionGeometry,
+} from "./siting.ts";
 import type { LandFacilityPermission, PipelineRoute, PriceSnapshot } from "./types.ts";
 
 function line(coordinates: number[][]): Feature<LineString> {
@@ -171,6 +178,53 @@ test("crossings stay with their location through edits and lose confirmation whe
   assert.equal(reprojectCrossings(rerouted).crossings[0]!.confirmation, "unreviewed");
 });
 
+test("construction ranges retain geographic anchors and require review when rerouted", () => {
+  const base = route();
+  const range = createConstructionRange({
+    route: base,
+    startStationM: 400,
+    endStationM: 800,
+    method: "open-trench",
+    conditions: ["rock"],
+    evidence: "field-confirmed",
+  });
+  const extended = routeFromLineFeature({
+    layerId: "routes",
+    layerName: "Routes",
+    featureIndex: 0,
+    feature: line([
+      [-97.01, 32],
+      [-96.98, 32],
+    ]),
+    previous: { ...base, constructionRanges: [range] },
+  });
+  const kept = reprojectConstructionRanges(base, extended).constructionRanges[0]!;
+  assert.ok(kept.startStationM > range.startStationM + 900);
+  assert.ok(kept.endStationM > range.endStationM + 900);
+  assert.equal(kept.placementReview, undefined);
+
+  const rerouted = routeFromLineFeature({
+    layerId: "routes",
+    layerName: "Routes",
+    featureIndex: 0,
+    feature: line([
+      [-97, 32.01],
+      [-96.98, 32.01],
+    ]),
+    previous: { ...base, constructionRanges: [range] },
+  });
+  const moved = reprojectConstructionRanges(base, rerouted).constructionRanges[0]!;
+  assert.ok((moved.placementReview?.movedM ?? 0) > 1_000);
+  const movedRoute = { ...rerouted, constructionRanges: [moved] };
+  const scenario = createDefaultScenario(movedRoute.id);
+  const estimate = calculatePreliminaryEstimate(
+    movedRoute,
+    scenario,
+    buildPreliminaryTakeoff(movedRoute, scenario, pipe),
+  );
+  assert.ok(estimate.warnings.some((warning) => warning.includes("requires confirmation")));
+});
+
 test("every takeoff item traces to the route and the snapshot to its geometry revision", () => {
   const base = route();
   const pump = createPipelineComponent({
@@ -247,6 +301,35 @@ test("the estimate is a ledger: unpriced items stay null and corrections add sna
   assert.equal(again.recommendedBid, estimate.recommendedBid);
 });
 
+test("estimate-only scenario changes recalculate the current total immediately", () => {
+  const base = route();
+  const scenario = createDefaultScenario(base.id);
+  const takeoff = buildPreliminaryTakeoff(base, scenario, pipe);
+  const state = {
+    ...emptyPipelineEngineeringState(),
+    routes: [base],
+    scenarios: [scenario],
+    quantitySnapshots: [takeoff],
+  };
+  const original = recalculateScenarioEstimate(state, scenario)!;
+  const changedScenario = {
+    ...scenario,
+    estimateAssumptions: {
+      ...scenario.estimateAssumptions,
+      installationPerM: 50,
+      contingencyPercent: 25,
+      markupPercent: 0,
+    },
+  };
+  const changed = recalculateScenarioEstimate(state, changedScenario)!;
+  assert.notEqual(changed.recommendedBid, original.recommendedBid);
+  assert.equal(
+    changed.installationCost,
+    base.lengthM * changedScenario.estimateAssumptions.installationPerM,
+  );
+  assert.equal(changed.markup, 0);
+});
+
 test("facility siting: tagged land is a hard constraint, untagged land imposes nothing", () => {
   const base = route();
   const pump = createPipelineComponent({
@@ -298,5 +381,58 @@ test("facility siting: tagged land is a hard constraint, untagged land imposes n
     ).length,
     1,
   );
-  assert.equal(facilitySitingFindings([pump], [meterOnly], () => undefined).length, 0);
+  const unresolved = facilitySitingFindings([pump], [meterOnly], () => undefined);
+  assert.equal(unresolved.length, 1);
+  assert.equal(unresolved[0]!.code, "FACILITY_SITING_REFERENCE_MISSING");
+});
+
+test("land siting rules follow stable feature identity instead of mutable array order", () => {
+  const first: Feature<Polygon> = {
+    type: "Feature",
+    id: "parcel-a",
+    properties: {},
+    geometry: {
+      type: "Polygon",
+      coordinates: [
+        [
+          [-97, 32],
+          [-96.99, 32],
+          [-96.99, 32.01],
+          [-97, 32.01],
+          [-97, 32],
+        ],
+      ],
+    },
+  };
+  const second: Feature<Polygon> = {
+    ...first,
+    id: "parcel-b",
+    geometry: {
+      type: "Polygon",
+      coordinates: [
+        [
+          [-98, 33],
+          [-97.99, 33],
+          [-97.99, 33.01],
+          [-98, 33.01],
+          [-98, 33],
+        ],
+      ],
+    },
+  };
+  const permission: LandFacilityPermission = {
+    id: "stable-permission",
+    layerId: "parcels",
+    featureId: "parcel-a",
+    geometryHash: geometryFingerprint(first.geometry),
+    featureIndex: 0,
+    label: "Parcel A",
+    noFacilities: true,
+    allowed: [],
+    updatedAt: 0,
+  };
+  assert.deepEqual(resolveLandPermissionGeometry(permission, [second, first]), first.geometry);
+  assert.equal(resolveLandPermissionGeometry(permission, [second]), undefined);
+  const { featureId: _featureId, geometryHash: _geometryHash, ...legacy } = permission;
+  assert.equal(resolveLandPermissionGeometry(legacy, [first]), undefined);
 });

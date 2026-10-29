@@ -71,6 +71,8 @@ export interface PolygonCandidateOption {
   key: string;
   layerId: string;
   featureIndex: number;
+  featureId?: string;
+  geometryHash: string;
   label: string;
 }
 
@@ -179,6 +181,28 @@ export function PipelineConstructionPanel({
             </span>{" "}
             · {label(range.method)} · {range.conditions.map(label).join(", ")}
             <span className="block text-muted-foreground">{label(range.evidence)}</span>
+            {range.placementReview && (
+              <span className="mt-1 block rounded-md bg-amber-50 p-2 text-amber-900">
+                Route edit moved this range up to {range.placementReview.movedM.toFixed(1)} m.
+                Confirm its stations before relying on quantities.
+                <button
+                  type="button"
+                  onClick={() =>
+                    onRouteChange((current) => ({
+                      ...current,
+                      constructionRanges: current.constructionRanges.map((item) => {
+                        if (item.id !== range.id) return item;
+                        const { placementReview: _review, ...confirmed } = item;
+                        return confirmed;
+                      }),
+                    }))
+                  }
+                  className="ml-2 font-semibold underline"
+                >
+                  Confirm
+                </button>
+              </span>
+            )}
           </Row>
         ))}
         <RangeForm
@@ -309,6 +333,8 @@ export function PipelineConstructionPanel({
                 id: `land-${Date.now()}`,
                 layerId: candidate.layerId,
                 featureIndex: candidate.featureIndex,
+                ...(candidate.featureId === undefined ? {} : { featureId: candidate.featureId }),
+                geometryHash: candidate.geometryHash,
                 label: candidate.label,
                 noFacilities: false,
                 allowed: [],

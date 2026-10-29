@@ -8,13 +8,13 @@ entitlement, provider or infrastructure change.
 
 ## Commits
 
-| Commit | Summary |
-| --- | --- |
-| `1153b88` | Solver: components as step changes; `limit-exceeded` status; benchmark tests |
-| `2f46b2b` | Components keep placement through route edits; station entry; review flag |
-| `366997e` | Survey/manual elevation control points; burial depth; abortable terrain |
-| `e565d53` | Constructability, land siting, takeoff v2, estimate ledger, "Build" tab |
-| (this doc) | Module doc update and this handoff |
+| Commit     | Summary                                                                      |
+| ---------- | ---------------------------------------------------------------------------- |
+| `1153b88`  | Solver: components as step changes; `limit-exceeded` status; benchmark tests |
+| `2f46b2b`  | Components keep placement through route edits; station entry; review flag    |
+| `366997e`  | Survey/manual elevation control points; burial depth; abortable terrain      |
+| `e565d53`  | Constructability, land siting, takeoff v2, estimate ledger, "Build" tab      |
+| (this doc) | Module doc update and this handoff                                           |
 
 ## Defects fixed in existing behaviour
 
@@ -34,6 +34,24 @@ entitlement, provider or infrastructure change.
 
 The input-hash model version is bumped (`liquid-steady-v3-component-steps`) so saved runs
 re-solve on open.
+
+## Codex review follow-up
+
+Codex's source review identified and repaired four edge cases before integration:
+
+1. Construction ranges now store geographic endpoint anchors, re-project after route edits and
+   receive a visible confirmation flag when either endpoint moves more than 1 m.
+2. New land-siting rules store stable feature IDs and geometry fingerprints. Mutable feature
+   indexes are display metadata only; an unresolved or legacy index-only reference is a blocker
+   that must be reconnected instead of silently applying to another polygon.
+3. Multiple elevation controls resolving to one station use deterministic recency/authority
+   precedence, so they cannot create a zero-length static-head jump. A correction entered at the
+   same station replaces the earlier control in the UI.
+4. Changes to contingency, markup and legacy per-metre allowances immediately reprice the current
+   estimate without requiring another hydraulic run.
+
+Selecting an unchanged route also no longer rebuilds it, while selecting an edited inactive route
+re-projects its components, construction ranges and crossings before it becomes active.
 
 ## New behaviour
 
@@ -66,7 +84,7 @@ re-solve on open.
 
 ## Verification (local, Node 26.13.0)
 
-- `node --experimental-strip-types --test src/lib/pipeline/*.test.ts`: **34 pass, 0 fail**
+- `node --experimental-strip-types --test src/lib/pipeline/*.test.ts`: **38 pass, 0 fail**
   (baseline before this work: 12 pass). New suites: `liquidSolver.test.ts`,
   `terrainModel.test.ts`, `constructability.test.ts`; `components.test.ts` updated.
 - Benchmarks: 64/Re exact; Colebrook within 1% of Moody reference points and residual < 1e-6;
@@ -83,10 +101,10 @@ re-solve on open.
 
 - `schemaVersion` stays 1. Every new field is optional, so existing saved projects load unchanged;
   old takeoffs without `key` fall back to the item id until the next solve regenerates them.
-- Construction ranges are station-based and are **not** re-projected on route edits (components,
-  crossings and control points are). Worth deciding before automatic detection lands.
-- Land permissions reference `layerId` + `featureIndex`, which is fragile if a layer's features are
-  reordered; a stable feature id would be better.
+- Construction ranges remain expressed as station ranges but now carry geographic anchors and a
+  route-edit review state.
+- New land permissions use stable feature ID/geometry identity; legacy index-only permissions must
+  be reconnected before they apply.
 - Takeoff quantities and rates use SI units (m, m², m³) while most of the UI displays feet.
 - The solve still runs on the UI thread (fine at ≤ 96 terrain samples).
 - `PipelineWorkspace.tsx` is now ~2,100 lines; splitting the right-panel tabs into files is a

@@ -48,6 +48,7 @@ import {
   buildPreliminaryTakeoff,
   calculatePreliminaryEstimate,
   currentRate,
+  recalculateScenarioEstimate,
 } from "@/lib/pipeline/estimating";
 import { priceEvidenceLabels, validatePriceEvidence } from "@/lib/pipeline/pricing";
 import {
@@ -57,11 +58,16 @@ import {
   reprojectRouteComponents,
 } from "@/lib/pipeline/components";
 import { applyLinearManualElevation, sampleUsgsTerrain } from "@/lib/pipeline/elevation";
-import { reprojectCrossings } from "@/lib/pipeline/constructability";
-import { facilitySitingFindings } from "@/lib/pipeline/siting";
+import { reprojectConstructionRanges, reprojectCrossings } from "@/lib/pipeline/constructability";
+import {
+  facilitySitingFindings,
+  geometryFingerprint,
+  resolveLandPermissionGeometry,
+} from "@/lib/pipeline/siting";
 import { PipelineConstructionPanel } from "@/components/pipeline/PipelineConstructionPanel";
 import { formatStation, money } from "@/components/pipeline/format";
 import {
+  CONTROL_STATION_TOLERANCE_M,
   DEFAULT_SURVEY_INFLUENCE_M,
   createControlPoint,
   resolveRouteElevations,
@@ -94,7 +100,14 @@ type LineCandidate = {
   label: string;
 };
 
-type PolygonCandidate = { key: string; layerId: string; featureIndex: number; label: string };
+type PolygonCandidate = {
+  key: string;
+  layerId: string;
+  featureIndex: number;
+  featureId?: string;
+  geometryHash: string;
+  label: string;
+};
 
 type MobilePanel = "model" | "properties" | "profile" | null;
 type TerrainStatus = {
@@ -170,6 +183,8 @@ export function PipelineWorkspace() {
                   key: `${layer.id}:${featureIndex}`,
                   layerId: layer.id,
                   featureIndex,
+                  ...(feature.id === undefined ? {} : { featureId: String(feature.id) }),
+                  geometryHash: geometryFingerprint(feature.geometry),
                   label: `${layer.name} · ${displayFeatureName(feature, `Feature ${featureIndex + 1}`)}`,
                 },
               ]
@@ -206,14 +221,21 @@ export function PipelineWorkspace() {
   const updateScenario = useCallback(
     (change: Partial<PipelineScenario>) => {
       if (!activeScenario) return;
-      updatePipeline((current) => ({
-        ...current,
-        scenarios: current.scenarios.map((scenario) =>
-          scenario.id === activeScenario.id
-            ? { ...scenario, ...change, updatedAt: Date.now() }
-            : scenario,
-        ),
-      }));
+      updatePipeline((current) => {
+        const stored = current.scenarios.find((scenario) => scenario.id === activeScenario.id);
+        if (!stored) return current;
+        const nextScenario = { ...stored, ...change, updatedAt: Date.now() };
+        const latestEstimate = change.estimateAssumptions
+          ? recalculateScenarioEstimate(current, nextScenario)
+          : undefined;
+        return {
+          ...current,
+          scenarios: current.scenarios.map((scenario) =>
+            scenario.id === nextScenario.id ? nextScenario : scenario,
+          ),
+          ...(latestEstimate ? { latestEstimate } : {}),
+        };
+      });
     },
     [activeScenario, updatePipeline],
   );
@@ -410,10 +432,12 @@ export function PipelineWorkspace() {
     return facilitySitingFindings(
       pipeline.components.filter((component) => component.routeId === activeRoute.id),
       pipeline.landPermissions,
-      (permission) =>
-        wb.layers.find((layer) => layer.id === permission.layerId)?.data.features[
-          permission.featureIndex
-        ]?.geometry,
+      (permission) => {
+        const layer = wb.layers.find((item) => item.id === permission.layerId);
+        return layer
+          ? resolveLandPermissionGeometry(permission, layer.data.features as Feature[])
+          : undefined;
+      },
     );
   }, [activeRoute, pipeline?.components, pipeline?.landPermissions, wb.layers]);
 
@@ -446,16 +470,15 @@ export function PipelineWorkspace() {
     if (!layer || feature?.geometry.type !== "LineString") return;
     const nextHash = geometryHash(feature.geometry.coordinates);
     if (nextHash === activeRoute.geometryHash) return;
+    const rebuilt = routeFromLineFeature({
+      layerId: layer.id,
+      layerName: layer.name,
+      featureIndex: activeRoute.sourceFeatureIndex,
+      feature: feature as Feature<LineString>,
+      previous: activeRoute,
+    });
     const refreshed = resolveRouteElevations(
-      reprojectCrossings(
-        routeFromLineFeature({
-          layerId: layer.id,
-          layerName: layer.name,
-          featureIndex: activeRoute.sourceFeatureIndex,
-          feature: feature as Feature<LineString>,
-          previous: activeRoute,
-        }),
-      ),
+      reprojectCrossings(reprojectConstructionRanges(activeRoute, rebuilt)),
     ).route;
     updatePipeline((current) => ({
       ...current,
@@ -472,10 +495,20 @@ export function PipelineWorkspace() {
         route.sourceLayerId === candidate.layerId &&
         route.sourceFeatureIndex === candidate.featureIndex,
     );
-    const route = routeFromLineFeature({
-      ...candidate,
-      ...(existing ? { previous: existing } : {}),
-    });
+    const candidateHash = geometryHash(candidate.feature.geometry.coordinates);
+    const geometryChanged = Boolean(existing && existing.geometryHash !== candidateHash);
+    const rebuilt =
+      existing && !geometryChanged
+        ? existing
+        : routeFromLineFeature({
+            ...candidate,
+            ...(existing ? { previous: existing } : {}),
+          });
+    const route =
+      existing && geometryChanged
+        ? resolveRouteElevations(reprojectCrossings(reprojectConstructionRanges(existing, rebuilt)))
+            .route
+        : rebuilt;
     updatePipeline((current) => {
       const scenario =
         current.scenarios.find((item) => item.routeId === route.id) ??
@@ -487,6 +520,10 @@ export function PipelineWorkspace() {
         routes: existing
           ? current.routes.map((item) => (item.id === route.id ? route : item))
           : [...current.routes, route],
+        components:
+          existing && geometryChanged
+            ? reprojectRouteComponents(current.components, existing, route)
+            : current.components,
         scenarios: current.scenarios.some((item) => item.id === scenario.id)
           ? current.scenarios
           : [...current.scenarios, scenario],
@@ -1878,22 +1915,31 @@ function ElevationControlPoints({
   );
   const [kind, setKind] = useState<"survey" | "manual">("survey");
   const controls = route.controlPoints ?? [];
-  const offRoute = new Set(resolveRouteElevations(route).offRouteControlIds);
+  const elevationResolution = resolveRouteElevations(route);
+  const offRoute = new Set(elevationResolution.offRouteControlIds);
+  const superseded = new Set(elevationResolution.supersededControlIds);
   const add = () =>
-    onRouteChange((current) => ({
-      ...current,
-      controlPoints: [
-        ...(current.controlPoints ?? []),
-        createControlPoint({
-          route: current,
-          stationM: stationFt / pipelineUnits.mToFt,
-          groundElevationM: elevationFt / pipelineUnits.mToFt,
-          influenceRangeM: influenceFt / pipelineUnits.mToFt,
-          sourceKind: kind,
-          source: kind === "survey" ? "User-entered survey elevation" : "User-entered elevation",
-        }),
-      ],
-    }));
+    onRouteChange((current) => {
+      const control = createControlPoint({
+        route: current,
+        stationM: stationFt / pipelineUnits.mToFt,
+        groundElevationM: elevationFt / pipelineUnits.mToFt,
+        influenceRangeM: influenceFt / pipelineUnits.mToFt,
+        sourceKind: kind,
+        source: kind === "survey" ? "User-entered survey elevation" : "User-entered elevation",
+      });
+      return {
+        ...current,
+        // Entering a correction at the same station replaces the old control instead of creating
+        // an impossible zero-length elevation jump in the hydraulic profile.
+        controlPoints: [
+          ...(current.controlPoints ?? []).filter(
+            (item) => Math.abs(item.stationM - control.stationM) > CONTROL_STATION_TOLERANCE_M,
+          ),
+          control,
+        ],
+      };
+    });
   return (
     <div className="space-y-2 rounded-xl border border-border p-3">
       <strong className="block text-[10px]">Survey and manual elevations</strong>
@@ -1926,6 +1972,11 @@ function ElevationControlPoints({
                 {((control.influenceRangeM ?? 0) * pipelineUnits.mToFt).toFixed(0)} ft
                 {offRoute.has(control.id) && (
                   <span className="block text-amber-800">Off the edited route; not applied</span>
+                )}
+                {superseded.has(control.id) && (
+                  <span className="block text-amber-800">
+                    Superseded by another control at this station
+                  </span>
                 )}
               </span>
               <button

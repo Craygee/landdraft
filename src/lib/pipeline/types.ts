@@ -157,6 +157,16 @@ export interface ConstructionRange {
     "default" | "model-estimated" | "provider-mapped" | "user-confirmed" | "field-confirmed";
   source?: string;
   notes?: string;
+  /** Geographic anchors keep the range attached to the same physical location after route edits. */
+  startCoordinate?: Position;
+  endCoordinate?: Position;
+  /** Set when a route edit moves either anchor far enough to require user confirmation. */
+  placementReview?: {
+    previousStartStationM: number;
+    previousEndStationM: number;
+    movedM: number;
+    detectedAt: number;
+  };
 }
 
 export interface PipelineRoute {
@@ -490,6 +500,11 @@ export type FacilityTag = "pump" | "compressor" | "pig-station" | "meter" | "abo
 export interface LandFacilityPermission {
   id: string;
   layerId: string;
+  /** Stable GeoJSON identity when the source supplies one. */
+  featureId?: string;
+  /** Geometry fallback for sources whose feature order changes or that do not provide IDs. */
+  geometryHash?: string;
+  /** Legacy/display index only; never preferred over stable identity. */
   featureIndex: number;
   label: string;
   /** When true, no tagged facility may be placed inside, whatever `allowed` says. */

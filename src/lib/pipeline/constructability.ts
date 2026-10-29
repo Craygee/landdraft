@@ -30,6 +30,9 @@ export const DEFAULT_TRENCH: TrenchAssumptions = {
   blastingPermitted: false,
 };
 
+/** A range moved farther than this by a route edit must be confirmed before reliance. */
+export const CONSTRUCTION_RANGE_REVIEW_DISTANCE_M = 1;
+
 export interface ResolvedConstructionInterval {
   startStationM: number;
   endStationM: number;
@@ -178,16 +181,66 @@ export function createConstructionRange(input: {
   notes?: string;
 }): ConstructionRange {
   const clamp = (value: number) => Math.max(0, Math.min(input.route.lengthM, value));
+  const startStationM = clamp(Math.min(input.startStationM, input.endStationM));
+  const endStationM = clamp(Math.max(input.startStationM, input.endStationM));
   return {
     id: `range-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     routeId: input.route.id,
-    startStationM: clamp(Math.min(input.startStationM, input.endStationM)),
-    endStationM: clamp(Math.max(input.startStationM, input.endStationM)),
+    startStationM,
+    endStationM,
+    startCoordinate: pointAtStation(input.route, startStationM),
+    endCoordinate: pointAtStation(input.route, endStationM),
     method: input.method,
     conditions: input.conditions,
     evidence: input.evidence,
     ...(input.source ? { source: input.source } : {}),
     ...(input.notes ? { notes: input.notes } : {}),
+  };
+}
+
+/**
+ * Keeps construction assumptions attached to their geographic location when the route changes.
+ * Legacy ranges without anchors are anchored from their previous stations on first edit. A moved
+ * range is retained but visibly requires confirmation instead of silently changing the estimate.
+ */
+export function reprojectConstructionRanges(
+  previousRoute: PipelineRoute,
+  nextRoute: PipelineRoute,
+  maximumOffsetM = CONSTRUCTION_RANGE_REVIEW_DISTANCE_M,
+): PipelineRoute {
+  const detectedAt = Date.now();
+  return {
+    ...nextRoute,
+    constructionRanges: nextRoute.constructionRanges.map((range) => {
+      const startAnchor =
+        range.startCoordinate ?? pointAtStation(previousRoute, range.startStationM);
+      const endAnchor = range.endCoordinate ?? pointAtStation(previousRoute, range.endStationM);
+      const projected = [
+        projectOntoRoute(nextRoute, startAnchor),
+        projectOntoRoute(nextRoute, endAnchor),
+      ].sort((a, b) => a.stationM - b.stationM);
+      const start = projected[0]!;
+      const end = projected[1]!;
+      const movedM = Math.max(start.offsetM, end.offsetM);
+      const placementReview =
+        movedM > maximumOffsetM
+          ? {
+              previousStartStationM:
+                range.placementReview?.previousStartStationM ?? range.startStationM,
+              previousEndStationM: range.placementReview?.previousEndStationM ?? range.endStationM,
+              movedM: Math.max(range.placementReview?.movedM ?? 0, movedM),
+              detectedAt,
+            }
+          : range.placementReview;
+      return {
+        ...range,
+        startStationM: start.stationM,
+        endStationM: end.stationM,
+        startCoordinate: pointAtStation(nextRoute, start.stationM),
+        endCoordinate: pointAtStation(nextRoute, end.stationM),
+        ...(placementReview ? { placementReview } : {}),
+      };
+    }),
   };
 }
 
