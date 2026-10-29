@@ -52,6 +52,11 @@ import {
   reprojectRouteComponents,
 } from "@/lib/pipeline/components";
 import { applyLinearManualElevation, sampleUsgsTerrain } from "@/lib/pipeline/elevation";
+import {
+  DEFAULT_SURVEY_INFLUENCE_M,
+  createControlPoint,
+  resolveRouteElevations,
+} from "@/lib/pipeline/terrainModel";
 import { interpolateProfile } from "@/lib/pipeline/liquidSolver";
 import { solvePipeline } from "@/lib/pipeline/solver";
 import type {
@@ -124,6 +129,8 @@ export function PipelineWorkspace() {
   );
   const initializedProjectRef = useRef<string | null>(null);
   const terrainAttemptsRef = useRef(new Set<string>());
+  const terrainAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => terrainAbortRef.current?.abort(), []);
 
   useEffect(() => {
     if (!wb.projectReady || wb.pipelineEngineering || !wb.canEditProject) return;
@@ -242,9 +249,13 @@ export function PipelineWorkspace() {
     async (route: PipelineRoute, announce = true) => {
       const routeKey = `${route.id}:${route.geometryHash}`;
       terrainAttemptsRef.current.add(routeKey);
+      // A newer geometry supersedes any terrain request still in flight for an older one.
+      terrainAbortRef.current?.abort();
+      const controller = new AbortController();
+      terrainAbortRef.current = controller;
       setTerrainStatus({ routeKey, state: "loading" });
       try {
-        const sampled = await sampleUsgsTerrain(route);
+        const sampled = await sampleUsgsTerrain(route, controller.signal);
         const missing = sampled.stations.length - sampled.elevationSamples.length;
         replaceRouteAndSolve(sampled);
         setTerrainStatus({
@@ -259,12 +270,24 @@ export function PipelineWorkspace() {
               : "USGS terrain profile loaded",
           );
       } catch (error) {
+        if (controller.signal.aborted) return;
         const message = error instanceof Error ? error.message : "Terrain profile unavailable";
         setTerrainStatus({ routeKey, state: "error", message });
         if (announce) toast.error(message);
       }
     },
     [replaceRouteAndSolve],
+  );
+
+  const changeActiveRoute = useCallback(
+    (change: (route: PipelineRoute) => PipelineRoute) => {
+      if (!activeRoute) return;
+      replaceRouteAndSolve({
+        ...resolveRouteElevations(change(activeRoute)).route,
+        updatedAt: Date.now(),
+      });
+    },
+    [activeRoute, replaceRouteAndSolve],
   );
 
   useEffect(() => {
@@ -331,13 +354,15 @@ export function PipelineWorkspace() {
     if (!layer || feature?.geometry.type !== "LineString") return;
     const nextHash = geometryHash(feature.geometry.coordinates);
     if (nextHash === activeRoute.geometryHash) return;
-    const refreshed = routeFromLineFeature({
-      layerId: layer.id,
-      layerName: layer.name,
-      featureIndex: activeRoute.sourceFeatureIndex,
-      feature: feature as Feature<LineString>,
-      previous: activeRoute,
-    });
+    const refreshed = resolveRouteElevations(
+      routeFromLineFeature({
+        layerId: layer.id,
+        layerName: layer.name,
+        featureIndex: activeRoute.sourceFeatureIndex,
+        feature: feature as Feature<LineString>,
+        previous: activeRoute,
+      }),
+    ).route;
     updatePipeline((current) => ({
       ...current,
       routes: current.routes.map((route) => (route.id === refreshed.id ? refreshed : route)),
@@ -720,6 +745,7 @@ export function PipelineWorkspace() {
                   onScenarioChange={updateScenario}
                   onRefreshTerrain={() => activeRoute && void refreshTerrain(activeRoute)}
                   onShowTopography={() => wb.setBasemapId("topo")}
+                  onRouteChange={changeActiveRoute}
                   onApplyElevation={(startElevationFt, endElevationFt) => {
                     if (!activeRoute) return;
                     const route = applyLinearManualElevation({
@@ -759,6 +785,7 @@ export function PipelineWorkspace() {
             onScenarioChange={updateScenario}
             onRefreshTerrain={() => activeRoute && void refreshTerrain(activeRoute)}
             onShowTopography={() => wb.setBasemapId("topo")}
+            onRouteChange={changeActiveRoute}
             onApplyElevation={(startElevationFt, endElevationFt) => {
               if (!activeRoute) return;
               const route = applyLinearManualElevation({
@@ -1068,6 +1095,7 @@ function PropertiesPanel({
   onRefreshTerrain,
   onShowTopography,
   onApplyElevation,
+  onRouteChange,
   onPreferenceChange,
 }: {
   pipeline: PipelineEngineeringState;
@@ -1080,6 +1108,7 @@ function PropertiesPanel({
   onRefreshTerrain: () => void;
   onShowTopography: () => void;
   onApplyElevation: (startElevationFt: number, endElevationFt: number) => void;
+  onRouteChange: (change: (route: PipelineRoute) => PipelineRoute) => void;
   onPreferenceChange: (change: Partial<PipelineEngineeringState["preferences"]>) => void;
 }) {
   const activeRun = pipeline.solverRuns.find((run) => run.scenarioId === scenario?.id);
@@ -1190,6 +1219,7 @@ function PropertiesPanel({
             onShowTopography={onShowTopography}
           />
           <ManualElevationControl route={route} onApply={onApplyElevation} />
+          <ElevationControlPoints route={route} onRouteChange={onRouteChange} />
           {endPoint && routeElevationChangeM !== undefined && (
             <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-[10px]">
               <strong className="block text-xs">Hydraulic pressure accounting</strong>
@@ -1524,7 +1554,7 @@ function TerrainElevationControl({
           <strong className="block text-[10px]">Terrain-following route profile</strong>
           <span className="block text-[9px] text-muted-foreground">
             {demSamples.length
-              ? `USGS 3DEP · ${demSamples.length} samples · ${coverage}% coverage`
+              ? `USGS 3DEP DEM · ${demSamples.length} samples · ${coverage}% coverage · not survey-grade`
               : currentStatus?.state === "loading"
                 ? "Sampling USGS 3DEP terrain…"
                 : "Terrain has not been sampled"}
@@ -1576,6 +1606,114 @@ function TerrainElevationControl({
   );
 }
 
+function ElevationControlPoints({
+  route,
+  onRouteChange,
+}: {
+  route: PipelineRoute;
+  onRouteChange: (change: (route: PipelineRoute) => PipelineRoute) => void;
+}) {
+  const [stationFt, setStationFt] = useState(0);
+  const [elevationFt, setElevationFt] = useState(0);
+  const [influenceFt, setInfluenceFt] = useState(
+    Math.round(DEFAULT_SURVEY_INFLUENCE_M * pipelineUnits.mToFt),
+  );
+  const [kind, setKind] = useState<"survey" | "manual">("survey");
+  const controls = route.controlPoints ?? [];
+  const offRoute = new Set(resolveRouteElevations(route).offRouteControlIds);
+  const add = () =>
+    onRouteChange((current) => ({
+      ...current,
+      controlPoints: [
+        ...(current.controlPoints ?? []),
+        createControlPoint({
+          route: current,
+          stationM: stationFt / pipelineUnits.mToFt,
+          groundElevationM: elevationFt / pipelineUnits.mToFt,
+          influenceRangeM: influenceFt / pipelineUnits.mToFt,
+          sourceKind: kind,
+          source: kind === "survey" ? "User-entered survey elevation" : "User-entered elevation",
+        }),
+      ],
+    }));
+  return (
+    <div className="space-y-2 rounded-xl border border-border p-3">
+      <strong className="block text-[10px]">Survey and manual elevations</strong>
+      <p className="text-[9px] text-muted-foreground">
+        Control points are exact at their station and correct the DEM only within their influence
+        range. They stay attached to their location when the route is edited.
+      </p>
+      <NumericField
+        label="Burial depth to pipe centerline"
+        unit="ft"
+        value={(route.burialDepthM ?? 0) * pipelineUnits.mToFt}
+        onChange={(depthFt) =>
+          onRouteChange((current) => ({
+            ...current,
+            burialDepthM: Math.max(0, depthFt / pipelineUnits.mToFt),
+          }))
+        }
+      />
+      {controls.length > 0 && (
+        <ul className="space-y-1 text-[9px]">
+          {controls.map((control) => (
+            <li
+              key={control.id}
+              className="flex items-center gap-2 rounded-lg bg-secondary px-2 py-1"
+            >
+              <span className="num min-w-0 flex-1">
+                {formatStation(control.stationM)} ·{" "}
+                {(control.groundElevationM * pipelineUnits.mToFt).toFixed(1)} ft ·{" "}
+                {control.sourceKind === "survey" ? "Surveyed" : "Manual"} · ±
+                {((control.influenceRangeM ?? 0) * pipelineUnits.mToFt).toFixed(0)} ft
+                {offRoute.has(control.id) && (
+                  <span className="block text-amber-800">Off the edited route; not applied</span>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  onRouteChange((current) => ({
+                    ...current,
+                    controlPoints: (current.controlPoints ?? []).filter(
+                      (item) => item.id !== control.id,
+                    ),
+                  }))
+                }
+                className="rounded-md p-1 text-muted-foreground hover:bg-red-50 hover:text-red-700"
+                aria-label="Remove elevation control point"
+              >
+                <Trash2 className="size-3" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <NumericField label="Station" unit="ft" value={stationFt} onChange={setStationFt} />
+        <NumericField label="Ground" unit="ft" value={elevationFt} onChange={setElevationFt} />
+        <NumericField label="Influence ±" unit="ft" value={influenceFt} onChange={setInfluenceFt} />
+        <LabeledSelect
+          label="Source"
+          value={kind}
+          onChange={(value) => setKind(value as "survey" | "manual")}
+          options={[
+            { value: "survey", label: "Surveyed" },
+            { value: "manual", label: "Manual" },
+          ]}
+        />
+      </div>
+      <button
+        type="button"
+        onClick={add}
+        className="w-full rounded-lg bg-secondary px-2 py-2 text-[9px] font-semibold hover:bg-accent"
+      >
+        Add elevation point
+      </button>
+    </div>
+  );
+}
+
 function LegendDot({ color, label }: { color: string; label: string }) {
   return (
     <span className="flex items-center gap-1">
@@ -1605,12 +1743,26 @@ function PressureScrubTooltip({
       <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
         <dt className="text-muted-foreground">Distance</dt>
         <dd>{(point.stationM * pipelineUnits.mToMi).toFixed(2)} mi</dd>
-        <dt className="text-muted-foreground">Elevation</dt>
+        <dt className="text-muted-foreground">Ground</dt>
+        <dd>
+          {point.groundElevationM === undefined
+            ? "Not sampled"
+            : `${(point.groundElevationM * pipelineUnits.mToFt).toFixed(0)} ft${
+                point.elevationProvenance ? ` · ${point.elevationProvenance}` : ""
+              }`}
+        </dd>
+        <dt className="text-muted-foreground">Pipe centerline</dt>
         <dd>
           {point.pipelineElevationM === undefined
             ? "Not sampled"
             : `${(point.pipelineElevationM * pipelineUnits.mToFt).toFixed(0)} ft`}
         </dd>
+        {point.discontinuity && (
+          <>
+            <dt className="text-muted-foreground">Component</dt>
+            <dd>{point.discontinuity === "downstream" ? "Discharge side" : "Suction side"}</dd>
+          </>
+        )}
         <dt className="text-muted-foreground">Pressure</dt>
         <dd>{(point.pressurePa * pipelineUnits.paToPsi).toFixed(1)} psi</dd>
         <dt className="text-muted-foreground">Elevation effect</dt>
@@ -1648,23 +1800,15 @@ function ManualElevationControl({
   onApply: (startElevationFt: number, endElevationFt: number) => void;
 }) {
   const [startElevationFt, setStartElevationFt] = useState(
-    (route.stations[0]?.pipelineElevationM ?? route.stations[0]?.groundElevationM ?? 0) *
-      pipelineUnits.mToFt,
+    (route.stations[0]?.groundElevationM ?? 0) * pipelineUnits.mToFt,
   );
   const [endElevationFt, setEndElevationFt] = useState(
-    (route.stations.at(-1)?.pipelineElevationM ?? route.stations.at(-1)?.groundElevationM ?? 0) *
-      pipelineUnits.mToFt,
+    (route.stations.at(-1)?.groundElevationM ?? 0) * pipelineUnits.mToFt,
   );
 
   useEffect(() => {
-    setStartElevationFt(
-      (route.stations[0]?.pipelineElevationM ?? route.stations[0]?.groundElevationM ?? 0) *
-        pipelineUnits.mToFt,
-    );
-    setEndElevationFt(
-      (route.stations.at(-1)?.pipelineElevationM ?? route.stations.at(-1)?.groundElevationM ?? 0) *
-        pipelineUnits.mToFt,
-    );
+    setStartElevationFt((route.stations[0]?.groundElevationM ?? 0) * pipelineUnits.mToFt);
+    setEndElevationFt((route.stations.at(-1)?.groundElevationM ?? 0) * pipelineUnits.mToFt);
   }, [route.id, route.stations]);
 
   return (

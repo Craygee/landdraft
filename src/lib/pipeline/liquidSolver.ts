@@ -212,6 +212,7 @@ export function solveSteadyLiquid(input: {
       frictionFactor,
       pressureLossPaPerM,
       provenance: "calculated",
+      ...(station.elevationProvenance ? { elevationProvenance: station.elevationProvenance } : {}),
       ...(discontinuity
         ? { discontinuity: discontinuity.side, componentIds: discontinuity.componentIds }
         : {}),

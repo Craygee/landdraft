@@ -68,6 +68,8 @@ export interface ElevationSample {
   capturedAt: number;
   quality: "high" | "medium" | "low" | "unknown";
   provenance: ValueProvenance;
+  /** Survey/manual control points only: distance either side over which they correct DEM. */
+  influenceRangeM?: number;
 }
 
 export interface PipelineStation {
@@ -76,6 +78,9 @@ export interface PipelineStation {
   groundElevationM?: number;
   pipelineElevationM?: number;
   elevationSampleId?: string;
+  /** Set on stations inserted at a survey/manual control point. */
+  controlPointId?: string;
+  elevationProvenance?: ValueProvenance;
 }
 
 export type CrossingType =
@@ -151,6 +156,10 @@ export interface PipelineRoute {
   coordinates: Position[];
   stations: PipelineStation[];
   elevationSamples: ElevationSample[];
+  /** Survey and manual elevation control points; kept through geometry edits. */
+  controlPoints?: ElevationSample[];
+  /** Ground surface to pipe centerline. Undefined means the profile follows grade. */
+  burialDepthM?: number;
   lengthM: number;
   sourceNodeName: string;
   destinationNodeName: string;
@@ -318,6 +327,8 @@ export interface PipelineProfilePoint {
   frictionFactor: number;
   pressureLossPaPerM: number;
   provenance: ValueProvenance;
+  /** Where the elevation came from (DEM provider, surveyed, user, interpolated, estimated). */
+  elevationProvenance?: ValueProvenance;
   /**
    * Set on the two points a solver emits at a component station where state changes in place
    * (pump boost, valve or meter loss). Values must never be interpolated between such a pair.

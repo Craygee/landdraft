@@ -291,6 +291,12 @@ export function routeFromLineFeature(input: {
     // valley at the wrong station and corrupt the static-head result. The workspace resamples the
     // edited route automatically.
     elevationSamples: [],
+    // Control points are located by coordinate, so they survive edits and are re-projected when
+    // the profile is resolved.
+    ...(input.previous?.controlPoints ? { controlPoints: input.previous.controlPoints } : {}),
+    ...(input.previous?.burialDepthM === undefined
+      ? {}
+      : { burialDepthM: input.previous.burialDepthM }),
     lengthM: stationM,
     sourceNodeName: input.previous?.sourceNodeName ?? "Source",
     destinationNodeName: input.previous?.destinationNodeName ?? "Destination",

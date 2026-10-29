@@ -1,5 +1,6 @@
 import type { Position } from "geojson";
 import { pointAtStation } from "./model.ts";
+import { resolveRouteElevations } from "./terrainModel.ts";
 import type { ElevationSample, PipelineRoute, PipelineStation } from "./types.ts";
 
 export const USGS_3DEP_PROVIDER_ID = "usgs-3dep";
@@ -152,12 +153,12 @@ export async function sampleUsgsTerrain(
     };
   });
   if (samples.length < 2) throw new Error("USGS 3DEP returned insufficient terrain coverage");
-  return {
+  return resolveRouteElevations({
     ...route,
     stations: sampledStations,
     elevationSamples: samples,
     updatedAt: Date.now(),
-  };
+  }).route;
 }
 
 export function applyLinearManualElevation(input: {
@@ -183,7 +184,7 @@ export function applyLinearManualElevation(input: {
       provenance: "user" as const,
     };
   });
-  return {
+  return resolveRouteElevations({
     ...input.route,
     elevationSamples: samples,
     stations: input.route.stations.map((station, index) => ({
@@ -193,5 +194,5 @@ export function applyLinearManualElevation(input: {
       elevationSampleId: samples[index]!.id,
     })),
     updatedAt: now,
-  };
+  }).route;
 }
