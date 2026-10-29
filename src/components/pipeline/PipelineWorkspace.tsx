@@ -48,6 +48,7 @@ import { buildPreliminaryTakeoff, calculatePreliminaryEstimate } from "@/lib/pip
 import {
   PIPELINE_COMPONENT_TEMPLATES,
   createPipelineComponent,
+  moveComponentToStation,
   reprojectRouteComponents,
 } from "@/lib/pipeline/components";
 import { applyLinearManualElevation, sampleUsgsTerrain } from "@/lib/pipeline/elevation";
@@ -452,6 +453,21 @@ export function PipelineWorkspace() {
     [updatePipeline],
   );
 
+  const moveComponent = useCallback(
+    (componentId: string, stationM: number) =>
+      updatePipeline((current) => {
+        const component = current.components.find((item) => item.id === componentId);
+        const route = current.routes.find((item) => item.id === component?.routeId);
+        if (!component || !route) return current;
+        const moved = moveComponentToStation(component, route, stationM);
+        return {
+          ...current,
+          components: current.components.map((item) => (item.id === componentId ? moved : item)),
+        };
+      }),
+    [updatePipeline],
+  );
+
   const removeComponent = useCallback(
     (componentId: string) =>
       updatePipeline((current) => ({
@@ -593,6 +609,7 @@ export function PipelineWorkspace() {
               setPendingComponentKind((current) => (current === kind ? null : kind))
             }
             onUpdateComponent={updateComponent}
+            onMoveComponent={moveComponent}
             onRemoveComponent={removeComponent}
           />
         </aside>
@@ -689,6 +706,7 @@ export function PipelineWorkspace() {
                     setPendingComponentKind((current) => (current === kind ? null : kind))
                   }
                   onUpdateComponent={updateComponent}
+                  onMoveComponent={moveComponent}
                   onRemoveComponent={removeComponent}
                 />
               ) : mobilePanel === "properties" ? (
@@ -822,6 +840,7 @@ function ModelPanel({
   onDraw,
   onBeginComponent,
   onUpdateComponent,
+  onMoveComponent,
   onRemoveComponent,
 }: {
   pipeline: PipelineEngineeringState;
@@ -833,6 +852,7 @@ function ModelPanel({
   onDraw: () => void;
   onBeginComponent: (kind: PipelineComponentKind) => void;
   onUpdateComponent: (componentId: string, change: Partial<PipelineComponent>) => void;
+  onMoveComponent: (componentId: string, stationM: number) => void;
   onRemoveComponent: (componentId: string) => void;
 }) {
   return (
@@ -937,6 +957,7 @@ function ModelPanel({
                 key={component.id}
                 component={component}
                 onUpdate={onUpdateComponent}
+                onMove={onMoveComponent}
                 onRemove={onRemoveComponent}
               />
             ))}
@@ -949,10 +970,12 @@ function ModelPanel({
 function ComponentCard({
   component,
   onUpdate,
+  onMove,
   onRemove,
 }: {
   component: PipelineComponent;
   onUpdate: (componentId: string, change: Partial<PipelineComponent>) => void;
+  onMove: (componentId: string, stationM: number) => void;
   onRemove: (componentId: string) => void;
 }) {
   const hasMinorLoss = component.kind === "block-valve" || component.kind === "flow-meter";
@@ -982,6 +1005,27 @@ function ComponentCard({
           <Trash2 className="size-3.5" />
         </button>
       </div>
+      {component.placementReview && (
+        <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[9px] text-amber-900">
+          A route edit moved this from station{" "}
+          {formatStation(component.placementReview.previousStationM)} (
+          {(component.placementReview.movedM * pipelineUnits.mToFt).toFixed(0)} ft). Enter the
+          intended station or confirm this one.
+          <button
+            type="button"
+            onClick={() => onMove(component.id, component.stationM)}
+            className="mt-1 block rounded-md bg-amber-600 px-2 py-1 font-semibold text-white"
+          >
+            Confirm placement
+          </button>
+        </div>
+      )}
+      <NumericField
+        label="Station"
+        unit="ft"
+        value={component.stationM * pipelineUnits.mToFt}
+        onChange={(stationFt) => onMove(component.id, stationFt / pipelineUnits.mToFt)}
+      />
       {hasMinorLoss && (
         <NumericField
           label="Minor-loss coefficient"

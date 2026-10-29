@@ -305,6 +305,16 @@ export function solveSteadyLiquid(input: {
       ),
     );
   for (const component of components) {
+    if (component.placementReview)
+      findings.push(
+        finding(
+          "warning",
+          `COMPONENT_PLACEMENT_REVIEW_${component.id}`,
+          `${component.name} moved with a route edit`,
+          `A route edit moved this component ${component.placementReview.movedM.toFixed(1)} m from where it was placed. Confirm its station before relying on this result.`,
+          component.stationM,
+        ),
+      );
     if (
       (component.kind === "centrifugal-pump" || component.kind === "booster-station") &&
       numericComponentProperty(component, "pressureBoostPa") === 0

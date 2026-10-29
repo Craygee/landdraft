@@ -241,6 +241,8 @@ export interface PipelineComponent {
   elevationM?: number;
   properties: Record<string, number | string | boolean | null>;
   source: "user" | "library" | "import";
+  /** Set when a route edit moved the component; cleared when the user confirms its station. */
+  placementReview?: { previousStationM: number; movedM: number; detectedAt: number };
   createdAt: number;
   updatedAt: number;
 }

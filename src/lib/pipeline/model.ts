@@ -351,6 +351,7 @@ export function pipelineInputHash(
       kind: component.kind,
       stationM: component.stationM,
       properties: component.properties,
+      placementReview: Boolean(component.placementReview),
     })),
   });
   let hash = 0;
