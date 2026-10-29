@@ -12,6 +12,7 @@ import { pipelineInputHash } from "./model.ts";
 import { numericComponentProperty } from "./components.ts";
 
 const GRAVITY_MS2 = 9.80665;
+export const LIQUID_SOLVER_VERSION = "0.3.0-preliminary";
 
 function finding(
   severity: SolverFinding["severity"],
@@ -62,7 +63,7 @@ export function solveSteadyLiquid(input: {
       scenarioId: scenario.id,
       routeId: route.id,
       solverId: "liquid-steady-v1",
-      solverVersion: "0.2.0-preliminary",
+      solverVersion: LIQUID_SOLVER_VERSION,
       readiness: "preliminary-unvalidated",
       status: "unsupported",
       inputHash,
@@ -126,7 +127,7 @@ export function solveSteadyLiquid(input: {
       scenarioId: scenario.id,
       routeId: route.id,
       solverId: "liquid-steady-v1",
-      solverVersion: "0.2.0-preliminary",
+      solverVersion: LIQUID_SOLVER_VERSION,
       readiness: "preliminary-unvalidated",
       status: "failed",
       inputHash,
@@ -177,61 +178,16 @@ export function solveSteadyLiquid(input: {
   let cumulativeFrictionLossPa = 0;
   let cumulativeMinorLossPa = 0;
   let cumulativePressureBoostPa = 0;
-  let remainingMinorK = scenario.totalMinorLossK;
-  const originComponents = components.filter((component) => component.stationM <= 0.001);
-  cumulativePressureBoostPa = originComponents.reduce(
-    (sum, component) => sum + numericComponentProperty(component, "pressureBoostPa"),
-    0,
-  );
-  cumulativeMinorLossPa =
-    originComponents.reduce(
-      (sum, component) => sum + numericComponentProperty(component, "minorLossK"),
-      0,
-    ) * dynamicPressurePa;
-  let pressurePa = scenario.inletPressurePa + cumulativePressureBoostPa - cumulativeMinorLossPa;
+  let pressurePa = scenario.inletPressurePa;
+  const pressureLossPaPerM =
+    scenario.flowM3S === 0 ? 0 : (frictionFactor / diameterM) * dynamicPressurePa;
+  const componentsByStation = assignComponentsToStations(analysisStations, components);
 
-  analysisStations.forEach((station, index) => {
-    if (index > 0) {
-      const previous = analysisStations[index - 1]!;
-      const lengthM = Math.max(0, station.stationM - previous.stationM);
-      const previousElevation = previous.pipelineElevationM ?? previous.groundElevationM;
-      const elevation = station.pipelineElevationM ?? station.groundElevationM;
-      const elevationDeltaM =
-        previousElevation === undefined || elevation === undefined
-          ? 0
-          : elevation - previousElevation;
-      const frictionLossPa =
-        scenario.flowM3S === 0 ? 0 : frictionFactor * (lengthM / diameterM) * dynamicPressurePa;
-      const stationComponents = components.filter(
-        (component) =>
-          component.stationM > previous.stationM + 0.001 &&
-          component.stationM <= station.stationM + 0.001,
-      );
-      const componentMinorK = stationComponents.reduce(
-        (sum, component) => sum + numericComponentProperty(component, "minorLossK"),
-        0,
-      );
-      const pressureBoostPa = stationComponents.reduce(
-        (sum, component) => sum + numericComponentProperty(component, "pressureBoostPa"),
-        0,
-      );
-      const scenarioMinorK = index === analysisStations.length - 1 ? remainingMinorK : 0;
-      const segmentMinorK = componentMinorK + scenarioMinorK;
-      remainingMinorK -= scenarioMinorK;
-      const minorLossPa = segmentMinorK * dynamicPressurePa;
-      const elevationPressureChangePa = -rho * GRAVITY_MS2 * elevationDeltaM;
-      cumulativePressureBoostPa += pressureBoostPa;
-      cumulativeFrictionLossPa += frictionLossPa;
-      cumulativeMinorLossPa += minorLossPa;
-      cumulativeElevationPressureChangePa += elevationPressureChangePa;
-      pressurePa += pressureBoostPa - frictionLossPa - minorLossPa + elevationPressureChangePa;
-    }
-
+  const pushPoint = (
+    station: (typeof analysisStations)[number],
+    discontinuity?: { side: "upstream" | "downstream"; componentIds: string[] },
+  ) => {
     const elevation = station.pipelineElevationM ?? station.groundElevationM;
-    const pressureMarginPa = scenario.limits.maopPa - pressurePa;
-    const minimumPressureMarginPa = pressurePa - scenario.limits.minimumPressurePa;
-    const pressureLossPaPerM =
-      scenario.flowM3S === 0 ? 0 : (frictionFactor / diameterM) * dynamicPressurePa;
     profile.push({
       stationM: station.stationM,
       coordinate: station.coordinate,
@@ -247,8 +203,8 @@ export function solveSteadyLiquid(input: {
       cumulativeFrictionLossPa,
       cumulativeMinorLossPa,
       cumulativePressureBoostPa,
-      pressureMarginPa,
-      minimumPressureMarginPa,
+      pressureMarginPa: scenario.limits.maopPa - pressurePa,
+      minimumPressureMarginPa: pressurePa - scenario.limits.minimumPressurePa,
       flowM3S: scenario.flowM3S,
       velocityMS,
       temperatureK: scenario.temperatureK,
@@ -256,7 +212,56 @@ export function solveSteadyLiquid(input: {
       frictionFactor,
       pressureLossPaPerM,
       provenance: "calculated",
+      ...(discontinuity
+        ? { discontinuity: discontinuity.side, componentIds: discontinuity.componentIds }
+        : {}),
     });
+  };
+
+  analysisStations.forEach((station, index) => {
+    if (index > 0) {
+      const previous = analysisStations[index - 1]!;
+      const lengthM = Math.max(0, station.stationM - previous.stationM);
+      const previousElevation = previous.pipelineElevationM ?? previous.groundElevationM;
+      const elevation = station.pipelineElevationM ?? station.groundElevationM;
+      const elevationDeltaM =
+        previousElevation === undefined || elevation === undefined
+          ? 0
+          : elevation - previousElevation;
+      const frictionLossPa =
+        scenario.flowM3S === 0 ? 0 : frictionFactor * (lengthM / diameterM) * dynamicPressurePa;
+      // The scenario's lumped minor-loss K is spread over the final pipe segment, as before.
+      const scenarioMinorLossPa =
+        index === analysisStations.length - 1 ? scenario.totalMinorLossK * dynamicPressurePa : 0;
+      const elevationPressureChangePa = -rho * GRAVITY_MS2 * elevationDeltaM;
+      cumulativeFrictionLossPa += frictionLossPa;
+      cumulativeMinorLossPa += scenarioMinorLossPa;
+      cumulativeElevationPressureChangePa += elevationPressureChangePa;
+      pressurePa += elevationPressureChangePa - frictionLossPa - scenarioMinorLossPa;
+    }
+
+    const stationComponents = componentsByStation.get(index) ?? [];
+    if (!stationComponents.length) {
+      pushPoint(station);
+      return;
+    }
+    // Component effects are step changes at one station. Emit the state on both sides so the
+    // profile, map colors and scrub never blend a pump boost or valve loss along the pipe.
+    const componentIds = stationComponents.map((component) => component.id);
+    pushPoint(station, { side: "upstream", componentIds });
+    const pressureBoostPa = stationComponents.reduce(
+      (sum, component) => sum + numericComponentProperty(component, "pressureBoostPa"),
+      0,
+    );
+    const componentMinorLossPa =
+      stationComponents.reduce(
+        (sum, component) => sum + numericComponentProperty(component, "minorLossK"),
+        0,
+      ) * dynamicPressurePa;
+    cumulativePressureBoostPa += pressureBoostPa;
+    cumulativeMinorLossPa += componentMinorLossPa;
+    pressurePa += pressureBoostPa - componentMinorLossPa;
+    pushPoint(station, { side: "downstream", componentIds });
   });
 
   for (const point of profile) {
@@ -315,9 +320,11 @@ export function solveSteadyLiquid(input: {
       );
   }
 
-  const status = findings.some((item) => item.severity === "error")
-    ? "warning"
-    : findings.length
+  // The paired points at a component station share a station, so per-station findings repeat.
+  const uniqueFindings = Array.from(new Map(findings.map((item) => [item.id, item])).values());
+  const status = uniqueFindings.some((item) => item.severity === "error")
+    ? "limit-exceeded"
+    : uniqueFindings.length
       ? "warning"
       : "solved";
   return {
@@ -325,7 +332,7 @@ export function solveSteadyLiquid(input: {
     scenarioId: scenario.id,
     routeId: route.id,
     solverId: "liquid-steady-v1",
-    solverVersion: "0.2.0-preliminary",
+    solverVersion: LIQUID_SOLVER_VERSION,
     readiness: "preliminary-unvalidated",
     status,
     inputHash,
@@ -333,8 +340,27 @@ export function solveSteadyLiquid(input: {
     startedAt,
     completedAt: Date.now(),
     profile,
-    findings,
+    findings: uniqueFindings,
   };
+}
+
+function assignComponentsToStations(
+  stations: Array<{ stationM: number }>,
+  components: PipelineComponent[],
+): Map<number, PipelineComponent[]> {
+  const assigned = new Map<number, PipelineComponent[]>();
+  for (const component of components) {
+    let nearestIndex = 0;
+    for (let index = 1; index < stations.length; index += 1) {
+      if (
+        Math.abs(stations[index]!.stationM - component.stationM) <
+        Math.abs(stations[nearestIndex]!.stationM - component.stationM)
+      )
+        nearestIndex = index;
+    }
+    assigned.set(nearestIndex, [...(assigned.get(nearestIndex) ?? []), component]);
+  }
+  return assigned;
 }
 
 function stationsWithComponents(route: PipelineRoute, components: PipelineComponent[]) {
@@ -369,7 +395,13 @@ export function interpolateProfile(
   if (!profile.length) return undefined;
   if (stationM <= profile[0]!.stationM) return profile[0];
   if (stationM >= profile.at(-1)!.stationM) return profile.at(-1);
-  const endIndex = profile.findIndex((point) => point.stationM >= stationM);
+  // At a solver station, report the solved point itself. Where a component splits the station
+  // into upstream/downstream points, the downstream (after-component) state is returned.
+  for (let index = profile.length - 1; index >= 0; index -= 1)
+    if (profile[index]!.stationM === stationM) return profile[index];
+  // The first point at or beyond the station and the point before it always lie on one pipe
+  // segment: paired component points share a station, so a blend never spans a component.
+  const endIndex = profile.findIndex((point) => point.stationM > stationM);
   if (endIndex <= 0) return profile[0];
   const start = profile[endIndex - 1]!;
   const end = profile[endIndex]!;
@@ -377,8 +409,9 @@ export function interpolateProfile(
   const number = (a: number, b: number) => a + (b - a) * fraction;
   const optional = (a: number | undefined, b: number | undefined) =>
     a === undefined || b === undefined ? undefined : number(a, b);
+  const { discontinuity: _discontinuity, componentIds: _componentIds, ...segmentStart } = start;
   return {
-    ...start,
+    ...segmentStart,
     stationM,
     coordinate: [
       number(Number(start.coordinate[0]), Number(end.coordinate[0])),

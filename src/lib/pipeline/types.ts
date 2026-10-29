@@ -283,7 +283,8 @@ export interface PipelineScenario {
   updatedAt: number;
 }
 
-export type SolverRunStatus = "solved" | "warning" | "failed" | "unsupported" | "stale";
+export type SolverRunStatus =
+  "solved" | "warning" | "limit-exceeded" | "failed" | "unsupported" | "stale";
 
 export interface SolverFinding {
   id: string;
@@ -315,6 +316,12 @@ export interface PipelineProfilePoint {
   frictionFactor: number;
   pressureLossPaPerM: number;
   provenance: ValueProvenance;
+  /**
+   * Set on the two points a solver emits at a component station where state changes in place
+   * (pump boost, valve or meter loss). Values must never be interpolated between such a pair.
+   */
+  discontinuity?: "upstream" | "downstream";
+  componentIds?: string[];
 }
 
 export interface PipelineSolverRun {

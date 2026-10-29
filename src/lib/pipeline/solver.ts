@@ -1,4 +1,4 @@
-import { solveSteadyLiquid } from "./liquidSolver.ts";
+import { LIQUID_SOLVER_VERSION, solveSteadyLiquid } from "./liquidSolver.ts";
 import type {
   PipeSpecification,
   PipelineComponent,
@@ -43,7 +43,7 @@ const preliminaryLiquidSolver: PipelineSolver = {
   descriptor: {
     id: "liquid-steady-v1",
     name: "Native steady incompressible liquid screening",
-    version: "0.2.0-preliminary",
+    version: LIQUID_SOLVER_VERSION,
     phaseModel: "single-phase-liquid",
     timeModel: "steady",
     validationStatus: "preliminary-unvalidated",

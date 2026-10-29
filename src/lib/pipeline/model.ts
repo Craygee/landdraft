@@ -329,7 +329,8 @@ export function pipelineInputHash(
   components: PipelineComponent[] = [],
 ): string {
   const source = JSON.stringify({
-    solverModelVersion: "liquid-steady-v2-elevation-accounting",
+    // Bumping this marks saved runs stale so Live Solve replaces them with the current model.
+    solverModelVersion: "liquid-steady-v3-component-steps",
     route: route.geometryHash,
     elevations: route.stations.map(
       (station) => station.pipelineElevationM ?? station.groundElevationM,

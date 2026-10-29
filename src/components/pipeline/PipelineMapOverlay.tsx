@@ -85,18 +85,26 @@ function buildSegments(
     : [0, 1];
   return {
     type: "FeatureCollection",
-    features: profile.slice(1).map((point, index) => ({
-      type: "Feature",
-      properties: {
-        color: resultColor(point, scenario, mode, range),
-        startStationM: profile[index]!.stationM,
-        endStationM: point.stationM,
-      },
-      geometry: {
-        type: "LineString",
-        coordinates: [profile[index]!.coordinate, point.coordinate],
-      },
-    })),
+    // A component emits an upstream/downstream pair at one station; that pair has no length to
+    // draw. Each drawn segment is colored by its downstream end, i.e. the arriving state.
+    features: profile.slice(1).flatMap((point, index) =>
+      point.stationM === profile[index]!.stationM
+        ? []
+        : [
+            {
+              type: "Feature" as const,
+              properties: {
+                color: resultColor(point, scenario, mode, range),
+                startStationM: profile[index]!.stationM,
+                endStationM: point.stationM,
+              },
+              geometry: {
+                type: "LineString" as const,
+                coordinates: [profile[index]!.coordinate, point.coordinate],
+              },
+            },
+          ],
+    ),
   };
 }
 

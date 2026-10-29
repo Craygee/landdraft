@@ -61,6 +61,7 @@ import type {
   PipelineRoute,
   PipelineScenario,
   PipelineVisualizationMode,
+  SolverRunStatus,
 } from "@/lib/pipeline/types";
 import { PipelineMapOverlay } from "./PipelineMapOverlay";
 import { PipelineProfile } from "./PipelineProfile";
@@ -1076,7 +1077,10 @@ function PropertiesPanel({
         </div>
       ) : panel === "engineering" ? (
         <div className="mt-4 space-y-3">
-          <StatusCallout status={activeRun?.status ?? "stale"} />
+          <StatusCallout
+            status={activeRun?.status ?? "stale"}
+            solverVersion={activeRun?.solverVersion}
+          />
           <LabeledSelect
             label="Fluid"
             value={scenario.fluidId}
@@ -1379,8 +1383,10 @@ function CostPanel({
 
 function StatusCallout({
   status,
+  solverVersion,
 }: {
-  status: "solved" | "warning" | "failed" | "unsupported" | "stale";
+  status: SolverRunStatus;
+  solverVersion: string | undefined;
 }) {
   return (
     <div
@@ -1388,7 +1394,7 @@ function StatusCallout({
         "rounded-xl border p-3 text-[10px]",
         status === "solved"
           ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-          : status === "unsupported" || status === "failed"
+          : status === "unsupported" || status === "failed" || status === "limit-exceeded"
             ? "border-red-200 bg-red-50 text-red-900"
             : "border-amber-200 bg-amber-50 text-amber-900",
       )}
@@ -1400,11 +1406,16 @@ function StatusCallout({
             ? "Advanced analysis required"
             : status === "failed"
               ? "Solve failed"
-              : status === "warning"
-                ? "Solved with findings"
-                : "Awaiting calculation"}
+              : status === "limit-exceeded"
+                ? "Solved — design limit exceeded"
+                : status === "warning"
+                  ? "Solved with findings"
+                  : "Awaiting calculation"}
       </strong>
-      <span>Native liquid solver v0.1.0 · preliminary/unvalidated for final design</span>
+      <span>
+        Native liquid solver {solverVersion ? `v${solverVersion}` : ""} · preliminary/unvalidated
+        for final design
+      </span>
     </div>
   );
 }
