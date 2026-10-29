@@ -302,6 +302,7 @@ export function routeFromLineFeature(input: {
     destinationNodeName: input.previous?.destinationNodeName ?? "Destination",
     crossings: input.previous?.crossings ?? [],
     constructionRanges: input.previous?.constructionRanges ?? [],
+    ...(input.previous?.trench ? { trench: input.previous.trench } : {}),
     createdAt: input.previous?.createdAt ?? now,
     updatedAt: now,
   };

@@ -108,7 +108,21 @@ export interface PipelineCrossing {
   constructionMethod?: ConstructionMethod;
   estimatedCost?: number;
   currency?: string;
+  /** Length of special construction (bore, casing, HDD) for this crossing. */
+  crossingLengthM?: number;
+  notes?: string;
   confirmation: "unreviewed" | "confirmed" | "corrected" | "rejected";
+}
+
+export interface TrenchAssumptions {
+  trenchWidthM: number;
+  beddingBelowPipeM: number;
+  defaultMethod: ConstructionMethod;
+  /** Share of trenched length outside rock ranges assumed to need rock excavation. */
+  rockAllowancePercent: number;
+  /** Rock is never assumed blastable; this must be set explicitly. */
+  blastingPermitted: boolean;
+  clearingWidthM?: number;
 }
 
 export type ConstructionMethod =
@@ -165,6 +179,7 @@ export interface PipelineRoute {
   destinationNodeName: string;
   crossings: PipelineCrossing[];
   constructionRanges: ConstructionRange[];
+  trench?: Partial<TrenchAssumptions>;
   createdAt: number;
   updatedAt: number;
 }
@@ -365,6 +380,8 @@ export type QuantityCategory =
 
 export interface QuantityTakeoffItem {
   id: string;
+  /** Stable rate key (e.g. "earthwork:excavation") that a price snapshot is matched against. */
+  key?: string;
   category: QuantityCategory;
   description: string;
   quantity: number;
@@ -447,6 +464,38 @@ export interface PipelineEstimateSummary {
   evidenceClass: PriceEvidenceClass;
   warnings: string[];
   calculatedAt: number;
+  takeoffSnapshotId?: string;
+  lines?: EstimateLine[];
+  unpricedCount?: number;
+}
+
+export interface EstimateLine {
+  id: string;
+  kind: "quantity" | "allowance" | "contingency" | "markup";
+  description: string;
+  quantityItemId?: string;
+  rateKey?: string;
+  quantity: number | null;
+  unit: string;
+  unitRate: number | null;
+  amount: number | null;
+  /** The immutable price snapshot that priced this line, when one did. */
+  priceSnapshotId?: string;
+  evidenceClass: PriceEvidenceClass | null;
+}
+
+export type FacilityTag = "pump" | "compressor" | "pig-station" | "meter" | "aboveground";
+
+/** Facility-siting rules for one LandDraft polygon (parcel, easement or area). */
+export interface LandFacilityPermission {
+  id: string;
+  layerId: string;
+  featureIndex: number;
+  label: string;
+  /** When true, no tagged facility may be placed inside, whatever `allowed` says. */
+  noFacilities: boolean;
+  allowed: FacilityTag[];
+  updatedAt: number;
 }
 
 export type PipelineVisualizationMode =
@@ -471,7 +520,8 @@ export interface PipelineWorkspacePreferences {
   leftPanelOpen: boolean;
   rightPanelOpen: boolean;
   visualizationMode: PipelineVisualizationMode;
-  selectedRightPanel: "engineering" | "materials" | "quantities" | "costs" | "warnings";
+  selectedRightPanel:
+    "engineering" | "materials" | "construction" | "quantities" | "costs" | "warnings";
 }
 
 export interface PipelineEngineeringState {
@@ -489,6 +539,7 @@ export interface PipelineEngineeringState {
   quantitySnapshots: QuantityTakeoffSnapshot[];
   vendorLibrary: VendorContact[];
   priceSnapshots: PriceSnapshot[];
+  landPermissions?: LandFacilityPermission[];
   latestEstimate?: PipelineEstimateSummary;
   preferences: PipelineWorkspacePreferences;
   createdAt: number;

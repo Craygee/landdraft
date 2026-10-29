@@ -44,7 +44,12 @@ import {
   pointAtStation,
   routeFromLineFeature,
 } from "@/lib/pipeline/model";
-import { buildPreliminaryTakeoff, calculatePreliminaryEstimate } from "@/lib/pipeline/estimating";
+import {
+  buildPreliminaryTakeoff,
+  calculatePreliminaryEstimate,
+  currentRate,
+} from "@/lib/pipeline/estimating";
+import { priceEvidenceLabels, validatePriceEvidence } from "@/lib/pipeline/pricing";
 import {
   PIPELINE_COMPONENT_TEMPLATES,
   createPipelineComponent,
@@ -52,6 +57,10 @@ import {
   reprojectRouteComponents,
 } from "@/lib/pipeline/components";
 import { applyLinearManualElevation, sampleUsgsTerrain } from "@/lib/pipeline/elevation";
+import { reprojectCrossings } from "@/lib/pipeline/constructability";
+import { facilitySitingFindings } from "@/lib/pipeline/siting";
+import { PipelineConstructionPanel } from "@/components/pipeline/PipelineConstructionPanel";
+import { formatStation, money } from "@/components/pipeline/format";
 import {
   DEFAULT_SURVEY_INFLUENCE_M,
   createControlPoint,
@@ -67,6 +76,10 @@ import type {
   PipelineRoute,
   PipelineScenario,
   PipelineVisualizationMode,
+  LandFacilityPermission,
+  PriceSnapshot,
+  QuantityTakeoffItem,
+  SolverFinding,
   SolverRunStatus,
 } from "@/lib/pipeline/types";
 import { PipelineMapOverlay } from "./PipelineMapOverlay";
@@ -81,6 +94,8 @@ type LineCandidate = {
   label: string;
 };
 
+type PolygonCandidate = { key: string; layerId: string; featureIndex: number; label: string };
+
 type MobilePanel = "model" | "properties" | "profile" | null;
 type TerrainStatus = {
   routeKey: string;
@@ -88,28 +103,12 @@ type TerrainStatus = {
   message?: string;
 };
 
-function displayFeatureName(feature: Feature<LineString>, fallback: string) {
+function displayFeatureName(feature: Pick<Feature, "properties">, fallback: string) {
   const properties = feature.properties ?? {};
   const value = ["NAME", "Name", "name", "LABEL", "label"]
     .map((key) => properties[key])
     .find((candidate) => typeof candidate === "string" && candidate.trim());
   return typeof value === "string" ? value : fallback;
-}
-
-function formatStation(distanceM: number) {
-  const feet = Math.max(0, distanceM * pipelineUnits.mToFt);
-  const major = Math.floor(feet / 100);
-  const minor = Math.round(feet - major * 100);
-  return `${major}+${minor.toString().padStart(2, "0")}`;
-}
-
-function money(value: number | null, currency = "USD") {
-  if (value === null) return "Not calculated";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 0,
-  }).format(value);
 }
 
 function signedPsi(valuePa: number) {
@@ -157,6 +156,25 @@ export function PipelineWorkspace() {
             },
           ];
         }),
+      ),
+    [wb.layers],
+  );
+
+  const polygonCandidates = useMemo<PolygonCandidate[]>(
+    () =>
+      wb.layers.flatMap((layer) =>
+        layer.data.features.flatMap((feature, featureIndex) =>
+          feature.geometry?.type === "Polygon" || feature.geometry?.type === "MultiPolygon"
+            ? [
+                {
+                  key: `${layer.id}:${featureIndex}`,
+                  layerId: layer.id,
+                  featureIndex,
+                  label: `${layer.name} · ${displayFeatureName(feature, `Feature ${featureIndex + 1}`)}`,
+                },
+              ]
+            : [],
+        ),
       ),
     [wb.layers],
   );
@@ -225,8 +243,18 @@ export function PipelineWorkspace() {
           pipe,
           components: current.components.filter((component) => component.routeId === nextRoute.id),
         });
-        const takeoff = buildPreliminaryTakeoff(nextRoute, scenario, pipe);
-        const estimate = calculatePreliminaryEstimate(nextRoute, scenario);
+        const takeoff = buildPreliminaryTakeoff(
+          nextRoute,
+          scenario,
+          pipe,
+          current.components.filter((component) => component.routeId === nextRoute.id),
+        );
+        const estimate = calculatePreliminaryEstimate(
+          nextRoute,
+          scenario,
+          takeoff,
+          current.priceSnapshots,
+        );
         return {
           ...current,
           routes,
@@ -307,8 +335,20 @@ export function PipelineWorkspace() {
       components:
         pipeline?.components.filter((component) => component.routeId === activeRoute.id) ?? [],
     });
-    const takeoff = buildPreliminaryTakeoff(activeRoute, activeScenario, activePipe);
-    const estimate = calculatePreliminaryEstimate(activeRoute, activeScenario);
+    const routeComponents =
+      pipeline?.components.filter((component) => component.routeId === activeRoute.id) ?? [];
+    const takeoff = buildPreliminaryTakeoff(
+      activeRoute,
+      activeScenario,
+      activePipe,
+      routeComponents,
+    );
+    const estimate = calculatePreliminaryEstimate(
+      activeRoute,
+      activeScenario,
+      takeoff,
+      pipeline?.priceSnapshots ?? [],
+    );
     updatePipeline((current) => ({
       ...current,
       solverRuns: [
@@ -323,7 +363,59 @@ export function PipelineWorkspace() {
     }));
     if (run.status === "unsupported" || run.status === "failed")
       toast.error(run.findings[0]?.title ?? "The pipeline case could not be solved");
-  }, [activeFluid, activePipe, activeRoute, activeScenario, pipeline?.components, updatePipeline]);
+  }, [
+    activeFluid,
+    activePipe,
+    activeRoute,
+    activeScenario,
+    pipeline?.components,
+    pipeline?.priceSnapshots,
+    updatePipeline,
+  ]);
+
+  const addRate = useCallback(
+    (snapshot: PriceSnapshot) =>
+      updatePipeline((current) => {
+        // Rates are immutable snapshots: a correction is a new, later snapshot.
+        const priceSnapshots = [...current.priceSnapshots, snapshot];
+        const scenario = current.scenarios.find((item) => item.id === current.activeScenarioId);
+        const route = current.routes.find((item) => item.id === scenario?.routeId);
+        const takeoff = current.quantitySnapshots.find((item) => item.scenarioId === scenario?.id);
+        return {
+          ...current,
+          priceSnapshots,
+          ...(scenario && route
+            ? {
+                latestEstimate: calculatePreliminaryEstimate(
+                  route,
+                  scenario,
+                  takeoff,
+                  priceSnapshots,
+                ),
+              }
+            : {}),
+        };
+      }),
+    [updatePipeline],
+  );
+
+  const updateLandPermissions = useCallback(
+    (landPermissions: LandFacilityPermission[]) =>
+      updatePipeline((current) => ({ ...current, landPermissions })),
+    [updatePipeline],
+  );
+
+  const sitingFindings = useMemo(() => {
+    if (!pipeline?.landPermissions?.length || !activeRoute) return [];
+    return facilitySitingFindings(
+      pipeline.components.filter((component) => component.routeId === activeRoute.id),
+      pipeline.landPermissions,
+      (permission) =>
+        wb.layers.find((layer) => layer.id === permission.layerId)?.data.features[
+          permission.featureIndex
+        ]?.geometry,
+    );
+  }, [activeRoute, pipeline?.components, pipeline?.landPermissions, wb.layers]);
 
   const currentInputHash = useMemo(() => {
     if (!activeRoute || !activeScenario || !activeFluid || !activePipe) return null;
@@ -355,13 +447,15 @@ export function PipelineWorkspace() {
     const nextHash = geometryHash(feature.geometry.coordinates);
     if (nextHash === activeRoute.geometryHash) return;
     const refreshed = resolveRouteElevations(
-      routeFromLineFeature({
-        layerId: layer.id,
-        layerName: layer.name,
-        featureIndex: activeRoute.sourceFeatureIndex,
-        feature: feature as Feature<LineString>,
-        previous: activeRoute,
-      }),
+      reprojectCrossings(
+        routeFromLineFeature({
+          layerId: layer.id,
+          layerName: layer.name,
+          featureIndex: activeRoute.sourceFeatureIndex,
+          feature: feature as Feature<LineString>,
+          previous: activeRoute,
+        }),
+      ),
     ).route;
     updatePipeline((current) => ({
       ...current,
@@ -537,7 +631,7 @@ export function PipelineWorkspace() {
     );
 
   const visualizationMode = pipeline.preferences.visualizationMode;
-  const findingCount = activeRun?.findings.length ?? 0;
+  const findingCount = (activeRun?.findings.length ?? 0) + sitingFindings.length;
   const inputIsStale = Boolean(currentInputHash && activeRun?.inputHash !== currentInputHash);
 
   return (
@@ -746,6 +840,10 @@ export function PipelineWorkspace() {
                   onRefreshTerrain={() => activeRoute && void refreshTerrain(activeRoute)}
                   onShowTopography={() => wb.setBasemapId("topo")}
                   onRouteChange={changeActiveRoute}
+                  polygonCandidates={polygonCandidates}
+                  sitingFindings={sitingFindings}
+                  onAddRate={addRate}
+                  onLandPermissionsChange={updateLandPermissions}
                   onApplyElevation={(startElevationFt, endElevationFt) => {
                     if (!activeRoute) return;
                     const route = applyLinearManualElevation({
@@ -786,6 +884,10 @@ export function PipelineWorkspace() {
             onRefreshTerrain={() => activeRoute && void refreshTerrain(activeRoute)}
             onShowTopography={() => wb.setBasemapId("topo")}
             onRouteChange={changeActiveRoute}
+            polygonCandidates={polygonCandidates}
+            sitingFindings={sitingFindings}
+            onAddRate={addRate}
+            onLandPermissionsChange={updateLandPermissions}
             onApplyElevation={(startElevationFt, endElevationFt) => {
               if (!activeRoute) return;
               const route = applyLinearManualElevation({
@@ -1096,6 +1198,10 @@ function PropertiesPanel({
   onShowTopography,
   onApplyElevation,
   onRouteChange,
+  polygonCandidates,
+  sitingFindings,
+  onAddRate,
+  onLandPermissionsChange,
   onPreferenceChange,
 }: {
   pipeline: PipelineEngineeringState;
@@ -1109,6 +1215,10 @@ function PropertiesPanel({
   onShowTopography: () => void;
   onApplyElevation: (startElevationFt: number, endElevationFt: number) => void;
   onRouteChange: (change: (route: PipelineRoute) => PipelineRoute) => void;
+  polygonCandidates: PolygonCandidate[];
+  sitingFindings: SolverFinding[];
+  onAddRate: (snapshot: PriceSnapshot) => void;
+  onLandPermissionsChange: (permissions: LandFacilityPermission[]) => void;
   onPreferenceChange: (change: Partial<PipelineEngineeringState["preferences"]>) => void;
 }) {
   const activeRun = pipeline.solverRuns.find((run) => run.scenarioId === scenario?.id);
@@ -1121,11 +1231,12 @@ function PropertiesPanel({
   const panel = pipeline.preferences.selectedRightPanel;
   return (
     <div className="p-3">
-      <div className="grid grid-cols-5 gap-1 rounded-xl bg-secondary p-1">
+      <div className="grid grid-cols-6 gap-1 rounded-xl bg-secondary p-1">
         {(
           [
             ["engineering", "Inputs"],
             ["materials", "Pipe"],
+            ["construction", "Build"],
             ["quantities", "QTO"],
             ["costs", "Cost"],
             ["warnings", `${findingCount}`],
@@ -1321,9 +1432,25 @@ function PropertiesPanel({
               </div>
             ))}
         </div>
+      ) : panel === "construction" ? (
+        <PipelineConstructionPanel
+          route={route}
+          pipe={pipeline.pipeSpecifications.find(
+            (pipe) => pipe.id === scenario.pipeSpecificationId,
+          )}
+          landPermissions={pipeline.landPermissions ?? []}
+          polygonCandidates={polygonCandidates}
+          sitingFindings={sitingFindings}
+          onRouteChange={onRouteChange}
+          onLandPermissionsChange={onLandPermissionsChange}
+        />
       ) : panel === "quantities" ? (
         <div className="mt-4 space-y-2">
           <h2 className="text-xs font-semibold">Live traceable takeoff</h2>
+          <p className="text-[9px] text-muted-foreground">
+            Geometry revision {takeoff?.geometryRevision ?? "—"}. Entering a rate adds a dated
+            snapshot; earlier rates are kept and never edited.
+          </p>
           {takeoff?.items.map((item) => (
             <div key={item.id} className="rounded-xl border border-border p-3">
               <strong className="block text-[10px]">{item.description}</strong>
@@ -1333,7 +1460,21 @@ function PropertiesPanel({
               <p className="mt-1 text-[9px] text-muted-foreground">
                 {item.formulaVersion} · {item.sourceIds.length} model source
                 {item.sourceIds.length === 1 ? "" : "s"}
+                {item.startStationM !== undefined && item.endStationM !== undefined
+                  ? ` · ${formatStation(item.startStationM)}–${formatStation(item.endStationM)}`
+                  : ""}
               </p>
+              {item.assumption && (
+                <p className="mt-1 text-[9px] leading-relaxed text-muted-foreground">
+                  {item.assumption}
+                </p>
+              )}
+              <RateEntry
+                item={item}
+                currency={scenario.estimateAssumptions.currency}
+                current={currentRate(pipeline.priceSnapshots, item.key ?? item.id, item.unit)}
+                onAdd={onAddRate}
+              />
             </div>
           )) ?? (
             <p className="text-xs text-muted-foreground">Run the model to create quantities.</p>
@@ -1343,7 +1484,7 @@ function PropertiesPanel({
         <CostPanel pipeline={pipeline} scenario={scenario} onScenarioChange={onScenarioChange} />
       ) : (
         <div className="mt-4 space-y-2">
-          {(activeRun?.findings ?? []).map((item) => (
+          {[...sitingFindings, ...(activeRun?.findings ?? [])].map((item) => (
             <div
               key={item.id}
               className={cn(
@@ -1362,11 +1503,113 @@ function PropertiesPanel({
               )}
             </div>
           ))}
-          {!activeRun?.findings.length && (
+          {!activeRun?.findings.length && !sitingFindings.length && (
             <p className="rounded-xl bg-secondary p-3 text-xs text-muted-foreground">
               No findings for the current run. Preliminary status still requires validation.
             </p>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Vendor Quote is omitted until the vendor library exists: a quote needs an identified vendor.
+const RATE_EVIDENCE_OPTIONS = [
+  "budget-allowance",
+  "market-estimate",
+  "recent-historical-price",
+  "published-current-price",
+] as const;
+
+function RateEntry({
+  item,
+  currency,
+  current,
+  onAdd,
+}: {
+  item: QuantityTakeoffItem;
+  currency: string;
+  current: PriceSnapshot | undefined;
+  onAdd: (snapshot: PriceSnapshot) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [unitPrice, setUnitPrice] = useState(current?.unitPrice ?? 0);
+  const [source, setSource] = useState("");
+  const [evidenceClass, setEvidenceClass] =
+    useState<(typeof RATE_EVIDENCE_OPTIONS)[number]>("budget-allowance");
+  const [errors, setErrors] = useState<string[]>([]);
+  return (
+    <div className="mt-2 text-[9px]">
+      {current ? (
+        <span>
+          {money(current.unitPrice, current.currency)} / {current.unit} ·{" "}
+          {priceEvidenceLabels[current.evidenceClass]} · {current.source}
+        </span>
+      ) : (
+        <span className="text-amber-800">No rate — excluded from the estimate</span>
+      )}
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="ml-2 font-semibold text-primary"
+      >
+        {open ? "Cancel" : current ? "New rate" : "Add rate"}
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2 rounded-lg bg-secondary p-2">
+          <NumericField
+            label="Unit rate"
+            unit={`${currency}/${item.unit}`}
+            value={unitPrice}
+            onChange={setUnitPrice}
+          />
+          <LabeledSelect
+            label="Evidence class"
+            value={evidenceClass}
+            onChange={(value) => setEvidenceClass(value as typeof evidenceClass)}
+            options={RATE_EVIDENCE_OPTIONS.map((value) => ({
+              value,
+              label: priceEvidenceLabels[value],
+            }))}
+          />
+          <label className="block">
+            <span className="mb-1 block text-[10px] font-medium">Source or basis</span>
+            <input
+              value={source}
+              onChange={(event) => setSource(event.target.value)}
+              placeholder="e.g. 2026 company cost book, line 14"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs"
+            />
+          </label>
+          {errors.map((error) => (
+            <p key={error} className="text-red-700">
+              {error}
+            </p>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              const draft = {
+                productKey: item.key ?? item.id,
+                productDescription: item.description,
+                unitPrice,
+                unit: item.unit,
+                currency,
+                source: source.trim(),
+                evidenceClass,
+                confidence: "low" as const,
+              };
+              const problems = validatePriceEvidence(draft);
+              setErrors(problems);
+              if (problems.length) return;
+              onAdd({ ...draft, id: `price-${Date.now()}`, retrievedAt: Date.now() });
+              setOpen(false);
+            }}
+            className="w-full rounded-lg bg-primary px-2 py-2 font-semibold text-primary-foreground"
+          >
+            Save rate snapshot
+          </button>
         </div>
       )}
     </div>
@@ -1390,9 +1633,9 @@ function CostPanel({
   return (
     <div className="mt-4 space-y-3">
       <p className="rounded-xl bg-secondary p-3 text-[10px] leading-relaxed">
-        Rates entered here are classified as <strong>Budget Allowance</strong>. They are not vendor
-        quotes. Freight, crossings, facilities and indirects are excluded from this foundation
-        total.
+        The per-metre fields below are <strong>Budget Allowances</strong>, not vendor quotes. Price
+        individual quantities (earthwork, rock, crossings, facilities) from the QTO tab; each rate
+        is kept as a dated snapshot.
       </p>
       <OptionalNumericField
         label="Pipe material"
@@ -1435,15 +1678,30 @@ function CostPanel({
         <strong className="num mt-1 block text-xl text-primary">
           {money(estimate?.recommendedBid ?? null, assumptions.currency)}
         </strong>
-        <dl className="mt-2 grid grid-cols-2 gap-1 text-[10px]">
-          <dt>Material</dt>
-          <dd className="text-right">{money(estimate?.materialCost ?? null)}</dd>
-          <dt>Installation</dt>
-          <dd className="text-right">{money(estimate?.installationCost ?? null)}</dd>
-          <dt>Contingency</dt>
-          <dd className="text-right">{money(estimate?.contingency ?? null)}</dd>
-          <dt>Markup</dt>
-          <dd className="text-right">{money(estimate?.markup ?? null)}</dd>
+        {estimate?.unpricedCount ? (
+          <span className="block text-[9px] text-amber-800">
+            Excludes {estimate.unpricedCount} unpriced quantit
+            {estimate.unpricedCount === 1 ? "y" : "ies"}
+          </span>
+        ) : null}
+        <dl className="mt-2 grid grid-cols-[1fr_auto] gap-x-2 gap-y-1 text-[10px]">
+          {(estimate?.lines ?? []).map((line) => (
+            <div key={line.id} className="contents">
+              <dt className={cn(line.amount === null && "text-muted-foreground")}>
+                {line.description}
+                {line.quantity !== null && line.unitRate !== null && (
+                  <span className="num block text-[9px] text-muted-foreground">
+                    {line.quantity.toLocaleString(undefined, { maximumFractionDigits: 1 })}{" "}
+                    {line.unit} × {money(line.unitRate, assumptions.currency)}
+                    {line.evidenceClass ? ` · ${priceEvidenceLabels[line.evidenceClass]}` : ""}
+                  </span>
+                )}
+              </dt>
+              <dd className="num text-right">
+                {line.amount === null ? "Unpriced" : money(line.amount, assumptions.currency)}
+              </dd>
+            </div>
+          ))}
         </dl>
       </div>
       {estimate?.warnings.map((warning) => (
