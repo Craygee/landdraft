@@ -10,6 +10,8 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "bun run test:gis && bun run test:weather && bun run test:pipeline && bun run test:water",
     "test:weather": "node --experimental-strip-types --test src/lib/weather/*.test.ts",
     "test:pipeline": "node --experimental-strip-types --test src/lib/pipeline/*.test.ts",
     "test:water": "node --experimental-strip-types --test src/lib/water/*.test.ts",
