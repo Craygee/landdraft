@@ -14,8 +14,8 @@ the categorized-symbology and GIS-assistant upgrade.
 
 | Copy                        | Repository                                          | Commit at tag                              |
 | --------------------------- | --------------------------------------------------- | ------------------------------------------ |
-| Primary source              | `https://github.com/Craygee/terrasketch-gis.git`    | `d2a04276a3526ff429c72661fb7c3176e6eaee59` |
-| Connected deployment source | `https://github.com/Craygee/terra-sketch-buddy.git` | `062a00d9db5426a1feacb42ebbdbfdb3ae415f0a` |
+| Primary source              | `https://github.com/Craygee/landdraft.git`            | `d2a04276a3526ff429c72661fb7c3176e6eaee59` |
+| Connected deployment source | `https://github.com/Craygee/landdraft-deployment.git` | `062a00d9db5426a1feacb42ebbdbfdb3ae415f0a` |
 
 Both tags were pushed to GitHub. Published Git history must remain forward-only: do not force push,
 rebase, amend, or squash commits already synchronized to the deployment service.

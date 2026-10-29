@@ -33,7 +33,7 @@ The old project-area Supabase cache migration/function is an inactive prototype,
 
 ## Weekly refresh and rollback
 
-GitHub Actions `.github/workflows/texas-parcels.yml` on `Craygee/terrasketch-gis` checks Mondays at 07:17 UTC and supports manual dispatch. It checks the newest public collection's explicit license, inventories all resources, compares source ETag, downloads only when changed, verifies archive length/hash, validates spatial and search-index counts, uploads immutable parts and search shards, then publishes `texas/current.json` last. Failed ingestion keeps the previous manifest.
+GitHub Actions `.github/workflows/texas-parcels.yml` on `Craygee/landdraft` checks Mondays at 07:17 UTC and supports manual dispatch. It checks the newest public collection's explicit license, inventories all resources, compares source ETag, downloads only when changed, verifies archive length/hash, validates spatial and search-index counts, uploads immutable parts and search shards, then publishes `texas/current.json` last. Failed ingestion keeps the previous manifest.
 
 A dedicated `PARCEL_PUBLISH_TOKEN` secret is in GitHub Actions and the parcel Worker's `PUBLISH_TOKEN`; never copy it into client code, reports or logs. The publisher endpoint only permits the public parcel namespace. Rotation is supported by `tools/texas-parcels-provision.mjs` using in-memory generation and CLI stdin. Keep previous versions for rollback; storage usage grows with new editions and requires deliberate retention review.
 
@@ -47,7 +47,7 @@ Automated checks cover retired-URL migration, index byte-range reads, viewport l
 
 Public storage publication: 219 indexed FlatGeobuf parts plus 91 missing-geometry Parquet files. All 219 mapped files passed hosted HEAD/size checks. Full hosted queries matched every source OBJECTID in a direct geometry scan (the publisher geodatabase's own spatial index incorrectly returned empty results): Austin 1,415 / 9.0 s, San Antonio 340 / 4.5 s, El Paso 746 / 2.1 s, rural western Texas 26 / 0.8 s. These are cold-path development measurements, not an SLA.
 
-The weekly workflow was manually executed successfully: https://github.com/Craygee/terrasketch-gis/actions/runs/34865511301 . It verified catalog/license, server-side publisher credentials, multipart write/readback and unchanged-edition detection. The future full changed-edition Linux job has not yet encountered a new publisher release; the first complete index was produced locally and uploaded with the same version/manifest scheme.
+The weekly workflow was manually executed successfully: https://github.com/Craygee/landdraft/actions/runs/34865511301 . It verified catalog/license, server-side publisher credentials, multipart write/readback and unchanged-edition detection. The future full changed-edition Linux job has not yet encountered a new publisher release; the first complete index was produced locally and uploaded with the same version/manifest scheme.
 
 Live application release commit: `be2edcd2` (Publish LandDraft 0.9.160 public Texas parcels), pushed normally to the deployment repository main branch after validation. Browser was signed out, so authenticated desktop/iPad/mobile UI verification remains outstanding. No database migrations were applied for this statewide implementation.
 
