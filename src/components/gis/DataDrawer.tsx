@@ -1,3 +1,4 @@
+import { PublicLayerAddedBadge } from "./PublicLayerAddedBadge";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
@@ -19,8 +20,22 @@ import {
   Save,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAccountPublicData } from "@/lib/gis/AccountPublicData";
+import type { AccountService } from "@/lib/gis/publicDataAccountModel";
+import {
+  PublicDataAccountSettings,
+  AccountServiceLibrary,
+  RemovedPublicDataSources,
+  RemovePublicDataSource,
+} from "./PublicDataAccountControls";
 
-import { categories, searchCatalog, US_STATES, type CatalogEntry } from "@/lib/gis/catalog";
+import {
+  categories,
+  searchCatalog,
+  SURFACE_WATER_CATEGORY,
+  US_STATES,
+  type CatalogEntry,
+} from "@/lib/gis/catalog";
 import { fetchArcgisFields, fetchRemoteGeoJSON, type ArcgisField } from "@/lib/gis/arcgis";
 import {
   dataGovDiscoveryUrl,
@@ -43,7 +58,17 @@ import { cn } from "@/lib/utils";
 import { importFile } from "@/lib/gis/import";
 
 const catalogLayerStyle = (entry: CatalogEntry) => {
-  if (entry.id === "tx-parcels") return { fillOpacity: 0, strokeWidth: 1.5 };
+  if (entry.id === "tx-parcels")
+    return {
+      fillOpacity: 0,
+      strokeWidth: 1,
+      labelEnabled: true,
+      labelTemplate: "{OWNER_NAME}",
+      labelFields: ["OWNER_NAME"],
+      labelMinZoom: 11,
+      labelSize: 11,
+      labelScaleWithZoom: true,
+    };
   if (entry.id === "us-state-boundaries-shp")
     return {
       fillOpacity: 0.08,
@@ -68,12 +93,20 @@ const catalogLayerStyle = (entry: CatalogEntry) => {
 };
 
 export function DataDrawer() {
+  const account = useAccountPublicData();
+  const accountRef = useRef(account);
+  accountRef.current = account;
+  const [everyMap, setEveryMap] = useState(false);
+  const [serviceName, setServiceName] = useState("");
   const { drawerOpen, setDrawerOpen, map, pendingCatalogQuery } = useMapRef();
   const wb = useWorkbench();
   const [query, setQuery] = useState(pendingCatalogQuery);
   const [category, setCategory] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [customUrl, setCustomUrl] = useState("");
+  const [sourceFilters, setSourceFilters] = useState<
+    Record<string, { field: string; operator: string; value: string }>
+  >({});
   const [county, setCounty] = useState("");
   const [showStates, setShowStates] = useState(false);
   const [mode, setMode] = useState<"layers" | "repositories">("layers");
@@ -91,8 +124,11 @@ export function DataDrawer() {
   connectionHintsRef.current = wb.connectionHints;
 
   const results = useMemo(
-    () => searchCatalog(query, category, wb.selectedStates),
-    [query, category, wb.selectedStates],
+    () =>
+      searchCatalog(query, category, wb.selectedStates, account.config.restoredDefaults).filter(
+        (entry) => !account.config.removed[`catalog:${entry.id}`],
+      ),
+    [query, category, wb.selectedStates, account.config.removed, account.config.restoredDefaults],
   );
   const repositories = useMemo(
     () => searchRepositories(query, wb.selectedStates),
@@ -106,8 +142,13 @@ export function DataDrawer() {
   const verifyConnections = useCallback(async (notify = false) => {
     setCheckingConnections(true);
     try {
-      const results = await checkProjectConnections(layersRef.current, connectionHintsRef.current);
+      const results = await checkProjectConnections(
+        layersRef.current,
+        connectionHintsRef.current,
+        accountRef.current.config,
+      );
       setConnections(results);
+      void accountRef.current.recordHealth(results).catch(() => {});
       const failed = results.filter((result) => result.status === "error");
       if (notify) {
         if (failed.length) {
@@ -135,13 +176,17 @@ export function DataDrawer() {
 
   const load = async (entry: CatalogEntry) => {
     const cloudOverride = wb.connectionHints[`catalog:${entry.id}`];
-    const resolvedEntryUrl = cloudOverride?.verified ? cloudOverride.url : resolveCatalogUrl(entry);
+    const resolvedEntryUrl =
+      account.config.overrides[`catalog:${entry.id}`] ??
+      (cloudOverride?.verified ? cloudOverride.url : resolveCatalogUrl(entry));
     const existing = wb.layers.find(
       (layer) =>
         (layer.source.kind === "remote" || layer.source.kind === "import") &&
         layer.source.catalogId === entry.id,
     );
-    if (existing) {
+    // Remote entries may be added repeatedly with different field selections or
+    // source filters. Reusing by catalog ID alone silently discards those options.
+    if (existing && entry.downloadUrl) {
       wb.updateLayer(existing.id, {
         visible: true,
         source:
@@ -207,10 +252,43 @@ export function DataDrawer() {
       if (entry.sourcePage) window.open(entry.sourcePage, "_blank", "noopener,noreferrer");
       return;
     }
-    const where =
+    const countyWhere =
       entry.countyField && county.trim()
         ? `${entry.countyField}='${county.trim().replaceAll("'", "''")}'`
         : undefined;
+    const filter = sourceFilters[entry.id];
+    let attributeWhere = "";
+    if (filter?.field) {
+      const metadata = fieldOptions[entry.id]?.find((item) => item.name === filter.field);
+      if (!metadata || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(filter.field)) {
+        toast.error("Choose a valid source field.");
+        return;
+      }
+      const escaped = filter.value.replaceAll("'", "''");
+      if (filter.operator === "empty") attributeWhere = filter.field + " IS NULL";
+      else if (filter.operator === "contains")
+        attributeWhere =
+          "UPPER(" +
+          filter.field +
+          ") LIKE '%" +
+          escaped.toUpperCase().replaceAll("%", "").replaceAll("_", "") +
+          "%'";
+      else {
+        const numeric = /Integer|SmallInteger|Double|Single|OID/.test(metadata.type);
+        if (numeric && (!filter.value.trim() || !Number.isFinite(Number(filter.value)))) {
+          toast.error("Enter a numeric filter value.");
+          return;
+        }
+        attributeWhere =
+          filter.field +
+          (filter.operator === "not_equals" ? " <> " : " = ") +
+          (numeric ? String(Number(filter.value)) : "'" + escaped + "'");
+      }
+    }
+    const where = [entry.where, countyWhere, attributeWhere]
+      .filter(Boolean)
+      .map((clause) => "(" + clause + ")")
+      .join(" AND ");
     const effectiveMinZoom =
       entry.minZoom ?? (entry.geometry === "point" ? 7 : entry.geometry === "line" ? 5 : 5);
     const source = {
@@ -221,15 +299,17 @@ export function DataDrawer() {
       ...(where ? { where } : {}),
       requiresViewport: true,
       minZoom: effectiveMinZoom,
+      ...(entry.id === "tx-parcels" ? { parcelDisplayVersion: 2 } : {}),
       ...(selectedFields[entry.id]?.length ? { outFields: selectedFields[entry.id] } : {}),
     };
-    wb.addLayer({
-      name: entry.name,
+    const addedLayer = wb.addLayer({
+      name: entry.name + (attributeWhere ? " · filtered" : ""),
       data: { type: "FeatureCollection", features: [] },
       groupId: "public",
       source,
       style: catalogLayerStyle(entry),
     });
+    wb.setActiveLayer(addedLayer.id);
     toast.success(`${entry.name} added`, {
       description:
         map && map.getZoom() < effectiveMinZoom
@@ -241,7 +321,9 @@ export function DataDrawer() {
 
   const inspectFields = async (entry: CatalogEntry) => {
     const cloudOverride = wb.connectionHints[`catalog:${entry.id}`];
-    const entryUrl = cloudOverride?.verified ? cloudOverride.url : resolveCatalogUrl(entry);
+    const entryUrl =
+      account.config.overrides[`catalog:${entry.id}`] ??
+      (cloudOverride?.verified ? cloudOverride.url : resolveCatalogUrl(entry));
     if (!entryUrl) return;
     if (inspectId === entry.id) {
       setInspectId(null);
@@ -280,7 +362,18 @@ export function DataDrawer() {
       if (result.kind === "basemap") {
         const basemapId = result.basemapId ?? result.id.replace(/^basemap:/, "");
         saveBasemapUrlOverride(basemapId, url);
+      } else if (result.id.startsWith("account:")) {
+        const id = result.id.slice(8);
+        await account.update((current) => {
+          const service = current.services[id];
+          if (!service) throw new Error("Account service no longer exists");
+          return { ...current, services: { ...current.services, [id]: { ...service, url } } };
+        });
       } else if (result.id.startsWith("catalog:")) {
+        await account.update((current) => ({
+          ...current,
+          overrides: { ...current.overrides, [result.id]: url },
+        }));
         const catalogId = result.id.slice("catalog:".length);
         saveCatalogUrlOverride(catalogId, url);
         for (const layer of wb.layers) {
@@ -366,8 +459,8 @@ export function DataDrawer() {
     });
   };
 
-  const loadCustom = async () => {
-    const url = customUrl.trim();
+  const loadCustom = async (saved?: AccountService) => {
+    const url = (saved?.url ?? customUrl).trim();
     if (!url) return;
     setLoadingId("custom");
     try {
@@ -376,11 +469,34 @@ export function DataDrawer() {
         ...(bboxValue ? { bbox: bboxValue } : {}),
         maxFeatures: 2000,
       });
+      const name =
+        saved?.name ?? (serviceName.trim() || url.split("/").filter(Boolean).slice(-3).join("/"));
+      if (!saved && everyMap) {
+        if (!account.ready)
+          throw new Error("Wait for account sync before adding an account-wide service");
+        const existing = Object.values(account.config.services).find(
+          (service) => service.url === url,
+        );
+        const service = { id: existing?.id ?? crypto.randomUUID(), name, url, everyMap: true };
+        await account.update((current) => {
+          const removed = { ...current.removed };
+          delete removed[`account:${service.id}`];
+          return { ...current, services: { ...current.services, [service.id]: service }, removed };
+        });
+        toast.success("Service added across your account", {
+          description:
+            "Included on this map and other editable maps as they open. Data loads for each map's visible area.",
+        });
+        setCustomUrl("");
+        setServiceName("");
+        setDrawerOpen(false);
+        return;
+      }
       wb.addLayer({
-        name: url.split("/").filter(Boolean).slice(-3).join("/"),
+        name,
         data,
         groupId: "public",
-        source: { kind: "remote", url },
+        source: { kind: "remote", url, requiresViewport: true, minZoom: 8 },
       });
       toast.success(`Connected · ${data.features.length} features`);
       setCustomUrl("");
@@ -394,10 +510,10 @@ export function DataDrawer() {
     }
   };
 
-  if (!drawerOpen) return null;
+  if (!drawerOpen || !wb.canEditProject) return null;
 
   return (
-    <div className="absolute inset-0 z-40 flex">
+    <div className="absolute inset-0 z-[80] flex">
       <button
         className="flex-1 bg-foreground/20 backdrop-blur-[2px]"
         aria-label="Close data drawer"
@@ -609,12 +725,26 @@ export function DataDrawer() {
               <Chip active={category === null} onClick={() => setCategory(null)}>
                 All
               </Chip>
+              <Chip
+                active={category === SURFACE_WATER_CATEGORY}
+                onClick={() => setCategory(SURFACE_WATER_CATEGORY)}
+              >
+                {SURFACE_WATER_CATEGORY}
+              </Chip>
               {categories.map((c) => (
                 <Chip key={c} active={category === c} onClick={() => setCategory(c)}>
                   {c}
                 </Chip>
               ))}
             </div>
+          )}
+          {mode === "layers" && category === SURFACE_WATER_CATEGORY && (
+            <p className="text-xs text-muted-foreground">
+              Add rivers and streams, lakes and ponds, wetlands, riparian habitats, hydrographic
+              points and watershed boundaries. Zoom in to load detailed features in your current map
+              area; each layer shows its minimum zoom. Wetland and riparian coverage varies by
+              survey area.
+            </p>
           )}
           <button
             onClick={() => setShowStates((value) => !value)}
@@ -668,13 +798,16 @@ export function DataDrawer() {
         <div className="flex-1 overflow-y-auto px-4 py-3">
           {mode === "layers" ? (
             <div className="space-y-2">
+              <AccountServiceLibrary onLoad={(service) => void loadCustom(service)} />
               {results.map((entry) => (
                 <div key={entry.id} className="rounded-xl border border-border bg-card p-3">
                   <div className="flex items-start gap-2">
                     <div className="flex-1">
                       <div className="text-sm font-semibold">{entry.name}</div>
+                      <PublicLayerAddedBadge catalogId={entry.id} />
                       <div className="text-[11px] font-medium text-primary">{entry.agency}</div>
                       <p className="mt-1 text-xs text-muted-foreground">{entry.description}</p>
+                      <RemovePublicDataSource sourceId={`catalog:${entry.id}`} />
                       {entry.countyField && (
                         <input
                           value={county}
@@ -716,7 +849,9 @@ export function DataDrawer() {
                         </span>
                         {entry.url && (
                           <span className="rounded-full bg-secondary px-2 py-0.5">
-                            zoom {entry.minZoom ?? (entry.geometry === "point" ? 7 : 5)}+
+                            {entry.id === "tx-parcels"
+                              ? "Borders 10+ · large-parcel labels 11+"
+                              : `zoom ${entry.minZoom ?? (entry.geometry === "point" ? 7 : 5)}+`}
                           </span>
                         )}
                         <span className="rounded-full bg-secondary px-2 py-0.5">
@@ -738,6 +873,81 @@ export function DataDrawer() {
                             : "Choose attributes to import"}
                         </button>
                       )}
+                      {inspectId === entry.id &&
+                        fieldOptions[entry.id] &&
+                        /\/(MapServer|FeatureServer)\/\d+/i.test(entry.url ?? "") && (
+                          <div className="mt-2 space-y-2 rounded-lg border border-border p-2">
+                            <p className="text-[11px] font-semibold">
+                              Filter features at the source
+                            </p>
+                            <select
+                              aria-label="Source filter field"
+                              className="w-full rounded border border-border bg-card p-1 text-xs"
+                              value={sourceFilters[entry.id]?.field ?? ""}
+                              onChange={(event) =>
+                                setSourceFilters((current) => ({
+                                  ...current,
+                                  [entry.id]: {
+                                    field: event.target.value,
+                                    operator: "equals",
+                                    value: "",
+                                  },
+                                }))
+                              }
+                            >
+                              <option value="">All features</option>
+                              {fieldOptions[entry.id]?.map((field) => (
+                                <option key={field.name} value={field.name}>
+                                  {field.alias || field.name}
+                                </option>
+                              ))}
+                            </select>
+                            {sourceFilters[entry.id]?.field && (
+                              <>
+                                <select
+                                  aria-label="Source filter comparison"
+                                  className="w-full rounded border border-border bg-card p-1 text-xs"
+                                  value={sourceFilters[entry.id]?.operator}
+                                  onChange={(event) =>
+                                    setSourceFilters((current) => ({
+                                      ...current,
+                                      [entry.id]: {
+                                        ...current[entry.id]!,
+                                        operator: event.target.value,
+                                      },
+                                    }))
+                                  }
+                                >
+                                  <option value="equals">equals</option>
+                                  <option value="not_equals">does not equal</option>
+                                  <option value="contains">contains text</option>
+                                  <option value="empty">is NULL</option>
+                                </select>
+                                {sourceFilters[entry.id]?.operator !== "empty" && (
+                                  <input
+                                    aria-label="Source filter value"
+                                    placeholder="Value, e.g. natural gas"
+                                    value={sourceFilters[entry.id]?.value ?? ""}
+                                    onChange={(event) =>
+                                      setSourceFilters((current) => ({
+                                        ...current,
+                                        [entry.id]: {
+                                          ...current[entry.id]!,
+                                          value: event.target.value,
+                                        },
+                                      }))
+                                    }
+                                    className="w-full rounded border border-border bg-card p-1 text-xs"
+                                  />
+                                )}
+                              </>
+                            )}
+                            <p className="text-[10px] text-muted-foreground">
+                              Only matching records load as you pan. Use the source's actual
+                              commodity value for natural gas pipelines.
+                            </p>
+                          </div>
+                        )}
                       {inspectId === entry.id && fieldOptions[entry.id] && (
                         <AttributePicker
                           fields={fieldOptions[entry.id] ?? []}
@@ -829,6 +1039,25 @@ export function DataDrawer() {
                 {loadingId === "custom" ? <Loader2 className="size-3.5 animate-spin" /> : "Load"}
               </button>
             </div>
+            <input
+              value={serviceName}
+              onChange={(event) => setServiceName(event.target.value)}
+              placeholder="Optional layer name"
+              aria-label="Connected service layer name"
+              className="mt-2 w-full rounded border bg-card p-2 text-base"
+            />
+            <label className="mt-2 flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={everyMap}
+                onChange={(event) => setEveryMap(event.target.checked)}
+              />
+              Add across my account on every editable map
+            </label>
+          </div>
+
+          <div className="mt-4">
+            <PublicDataAccountSettings />
           </div>
 
           <div className="mt-4 flex gap-2 rounded-xl bg-secondary/60 p-3 text-[10px] leading-relaxed text-muted-foreground">
@@ -840,6 +1069,7 @@ export function DataDrawer() {
               county records office and a licensed surveyor.
             </p>
           </div>
+          <RemovedPublicDataSources />
         </div>
       </aside>
     </div>

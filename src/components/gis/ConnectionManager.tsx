@@ -26,6 +26,7 @@ import {
 } from "@/lib/gis/connectionHealth";
 import { basemapProbeUrl, saveBasemapUrlOverride } from "@/lib/gis/basemaps";
 import { cn } from "@/lib/utils";
+import { useAccountPublicData } from "@/lib/gis/AccountPublicData";
 
 const statusLabel = {
   healthy: "Connected",
@@ -33,11 +34,16 @@ const statusLabel = {
   error: "Needs attention",
 } as const;
 
-export function ConnectionManager() {
+export function ConnectionManager({ floatingBadge = true }: { floatingBadge?: boolean } = {}) {
+  const account = useAccountPublicData();
+  const accountRef = useRef(account);
+  accountRef.current = account;
   const wb = useWorkbench();
   const { connectionsOpen, setConnectionsOpen, setDrawerOpen } = useMapRef();
   const [connections, setConnections] = useState<ConnectionResult[]>([]);
   const [checking, setChecking] = useState(false);
+  const [badgeExpanded, setBadgeExpanded] = useState(false);
+  const [badgeHidden, setBadgeHidden] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -45,6 +51,7 @@ export function ConnectionManager() {
   const wbRef = useRef(wb);
   wbRef.current = wb;
   const autoCheckedProject = useRef<string | null>(null);
+  const checkingRef = useRef(false);
 
   const applyReplacement = useCallback(
     async (result: ConnectionResult, replacement: ConnectionReplacement, quiet = false) => {
@@ -57,7 +64,22 @@ export function ConnectionManager() {
       );
       if (result.kind === "basemap") {
         saveBasemapUrlOverride(result.basemapId ?? result.id.replace(/^basemap:/, ""), url);
+      } else if (result.id.startsWith("account:")) {
+        const id = result.id.slice(8);
+        await accountRef.current.update((config) => {
+          const service = config.services[id];
+          if (!service) throw new Error("Account service no longer exists");
+          return { ...config, services: { ...config.services, [id]: { ...service, url } } };
+        });
+        for (const layer of current.layers) {
+          if (layer.source.kind === "remote" && layer.source.accountServiceId === id)
+            current.updateLayer(layer.id, { source: { ...layer.source, url } });
+        }
       } else if (result.id.startsWith("catalog:")) {
+        await accountRef.current.update((config) => ({
+          ...config,
+          overrides: { ...config.overrides, [result.id]: url },
+        }));
         const catalogId = result.id.slice("catalog:".length);
         saveCatalogUrlOverride(catalogId, url);
         for (const layer of current.layers) {
@@ -87,11 +109,14 @@ export function ConnectionManager() {
 
   const checkAll = useCallback(
     async ({ autoRepair = false, notify = false } = {}) => {
+      if (checkingRef.current || !navigator.onLine) return;
+      checkingRef.current = true;
       setChecking(true);
       try {
         let results = await checkProjectConnections(
           wbRef.current.layers,
           wbRef.current.connectionHints,
+          accountRef.current.config,
         );
         let repaired = 0;
         if (autoRepair) {
@@ -115,10 +140,14 @@ export function ConnectionManager() {
             results = await checkProjectConnections(
               wbRef.current.layers,
               wbRef.current.connectionHints,
+              accountRef.current.config,
             );
           }
         }
         setConnections(results);
+        void accountRef.current.recordHealth(results).catch(() => {
+          // Current connection results remain usable even when account sync is offline.
+        });
         const failed = results.filter((item) => item.status === "error");
         if (repaired)
           toast.success(
@@ -130,24 +159,47 @@ export function ConnectionManager() {
               `${failed.length} connection${failed.length === 1 ? "" : "s"} need attention`,
               {
                 description:
-                  "Automatic recovery was attempted first. Open Info → Connections for details.",
+                  "Automatic recovery was attempted. Select View connections to see details and repair options.",
+                action: {
+                  label: "View connections",
+                  onClick: () => {
+                    setExpandedId(failed[0]?.id ?? null);
+                    setConnectionsOpen(true);
+                  },
+                },
               },
             );
           else if (!repaired) toast.success("All map and public-data connections are online");
         }
       } finally {
+        checkingRef.current = false;
         setChecking(false);
       }
     },
-    [applyReplacement],
+    [applyReplacement, setConnectionsOpen],
   );
 
+  const accountConnections = JSON.stringify([
+    account.config.services,
+    account.config.removed,
+    account.config.overrides,
+    account.config.restoredDefaults,
+  ]);
   useEffect(() => {
-    if (!wb.projectReady || !wb.projectId || autoCheckedProject.current === wb.projectId) return;
-    autoCheckedProject.current = wb.projectId;
-    const timer = window.setTimeout(() => void checkAll({ autoRepair: true, notify: true }), 900);
+    const key = wb.projectId + accountConnections;
+    if (!account.ready || !wb.projectReady || !wb.projectId || autoCheckedProject.current === key)
+      return;
+    const timer = window.setTimeout(() => {
+      autoCheckedProject.current = key;
+      void checkAll({ autoRepair: true, notify: true });
+    }, 900);
     return () => window.clearTimeout(timer);
-  }, [checkAll, wb.projectId, wb.projectReady]);
+  }, [checkAll, wb.projectId, wb.projectReady, account.ready, accountConnections]);
+  useEffect(() => {
+    if (!account.ready || !wb.projectReady) return;
+    const timer = window.setInterval(() => void checkAll(), 6 * 60 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [account.ready, checkAll, wb.projectReady]);
 
   useEffect(() => {
     if (connectionsOpen && !connections.length && !checking) void checkAll();
@@ -214,7 +266,47 @@ export function ConnectionManager() {
     [connections],
   );
 
-  if (!connectionsOpen) return null;
+  if (!connectionsOpen) {
+    const failed = connections.filter((result) => result.status === "error");
+    if (!floatingBadge || !failed.length || wb.selectedFeatures.length > 0 || badgeHidden)
+      return null;
+    return (
+      <div
+        className="connection-status-control fixed bottom-28 right-3 z-[60] flex max-w-[calc(100vw-1.5rem)] items-center rounded-xl border border-destructive/30 bg-card text-xs font-semibold text-destructive shadow-float sm:bottom-4"
+        data-connection-badge="true"
+      >
+        <button
+          onClick={() => setBadgeExpanded(!badgeExpanded)}
+          aria-expanded={badgeExpanded}
+          aria-label={`${badgeExpanded ? "Collapse" : "Expand"} ${failed.length} connection issues`}
+          className="flex min-h-11 min-w-11 items-center justify-center gap-1 px-2"
+        >
+          <Link2 className="size-4 shrink-0" />
+          <span>{failed.length}</span>
+        </button>
+        {badgeExpanded && (
+          <>
+            <button
+              onClick={() => {
+                setExpandedId(failed[0]?.id ?? null);
+                setConnectionsOpen(true);
+              }}
+              className="min-h-11 px-2"
+            >
+              View connection details
+            </button>
+            <button
+              onClick={() => setBadgeHidden(true)}
+              aria-label="Hide connection status; reopen from Help and settings, API connections"
+              className="flex size-11 shrink-0 items-center justify-center"
+            >
+              <X className="size-4" />
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-foreground/25 p-3 backdrop-blur-[2px]">

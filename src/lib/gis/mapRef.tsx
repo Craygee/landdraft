@@ -25,8 +25,16 @@ interface MapRefApi {
   setAssistantOpen: (open: boolean) => void;
   printOpen: boolean;
   setPrintOpen: (open: boolean) => void;
+  pendingPrintAnalysisId: string | null;
+  setPendingPrintAnalysisId: (id: string | null) => void;
+  elevationProfileOpen: boolean;
+  setElevationProfileOpen: (open: boolean) => void;
+  buildableAreaOpen: boolean;
+  setBuildableAreaOpen: (open: boolean) => void;
   analysisOpen: boolean;
   setAnalysisOpen: (open: boolean) => void;
+  layerRenderErrors: Record<string, string>;
+  setLayerRenderErrors: (errors: Record<string, string>) => void;
   connectionsOpen: boolean;
   setConnectionsOpen: (open: boolean) => void;
   recordsOpen: boolean;
@@ -58,7 +66,11 @@ export function MapRefProvider({ children }: { children: ReactNode }) {
   const [tableOpen, setTableOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
+  const [pendingPrintAnalysisId, setPendingPrintAnalysisId] = useState<string | null>(null);
+  const [elevationProfileOpen, setElevationProfileOpen] = useState(false);
+  const [buildableAreaOpen, setBuildableAreaOpen] = useState(false);
   const [analysisOpen, setAnalysisOpen] = useState(false);
+  const [layerRenderErrors, setLayerRenderErrors] = useState<Record<string, string>>({});
   const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [recordsOpen, setRecordsOpen] = useState(false);
   const [recordsTargetNoteId, setRecordsTargetNoteId] = useState<string | null>(null);
@@ -90,8 +102,16 @@ export function MapRefProvider({ children }: { children: ReactNode }) {
       setAssistantOpen,
       printOpen,
       setPrintOpen,
+      pendingPrintAnalysisId,
+      setPendingPrintAnalysisId,
+      elevationProfileOpen,
+      setElevationProfileOpen,
+      buildableAreaOpen,
+      setBuildableAreaOpen,
       analysisOpen,
       setAnalysisOpen,
+      layerRenderErrors,
+      setLayerRenderErrors,
       connectionsOpen,
       setConnectionsOpen,
       recordsOpen,
@@ -119,7 +139,11 @@ export function MapRefProvider({ children }: { children: ReactNode }) {
       tableOpen,
       assistantOpen,
       printOpen,
+      pendingPrintAnalysisId,
+      elevationProfileOpen,
+      buildableAreaOpen,
       analysisOpen,
+      layerRenderErrors,
       connectionsOpen,
       recordsOpen,
       recordsTargetNoteId,

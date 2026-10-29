@@ -293,3 +293,9 @@ drop policy if exists "project_assets_delete_own" on storage.objects;
 create policy "project_assets_delete_own" on storage.objects
   for delete to authenticated
   using (bucket_id = 'project-assets' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- Explicit server access: do not depend on Supabase automatic Data API grants.
+grant select, insert, update, delete on public.profiles, public.projects, public.project_members, public.project_versions to service_role;
+
+-- Required alongside per-object grants when rebuilding an installation.
+grant usage on schema public to anon, authenticated, service_role;

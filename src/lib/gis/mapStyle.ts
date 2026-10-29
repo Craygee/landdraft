@@ -1,5 +1,8 @@
+import { layerOpacity } from "./layerOpacity.ts";
+import { pointSymbolOpacity } from "./iconOpacity.ts";
 import type { Map as MlMap, LayerSpecification } from "maplibre-gl";
 import type { GisLayer, FillPattern } from "./types";
+import { isParcelLayer, parcelLabelSourceId, parcelLabelSizeExpression } from "./parcelDisplay.ts";
 
 export const sourceId = (layerId: string) => `src-${layerId}`;
 export const fillId = (layerId: string) => `fill-${layerId}`;
@@ -18,13 +21,14 @@ export const patternImageId = (pattern: FillPattern, color: string) =>
 
 type LabelGeometry = "point" | "line" | "polygon" | "mixed";
 
-const primaryLabelGeometry = (layer: GisLayer): LabelGeometry => {
+export const primaryLabelGeometry = (layer: GisLayer): LabelGeometry => {
   const counts: Record<Exclude<LabelGeometry, "mixed">, number> = {
     point: 0,
     line: 0,
     polygon: 0,
   };
   for (const feature of layer.data.features) {
+    if (!feature.geometry) continue;
     if (/Point$/i.test(feature.geometry.type)) counts.point += 1;
     else if (/LineString$/i.test(feature.geometry.type)) counts.line += 1;
     else if (/Polygon$/i.test(feature.geometry.type)) counts.polygon += 1;
@@ -32,13 +36,12 @@ const primaryLabelGeometry = (layer: GisLayer): LabelGeometry => {
   const populated = (Object.entries(counts) as Array<[Exclude<LabelGeometry, "mixed">, number]>)
     .filter(([, count]) => count > 0)
     .sort((a, b) => b[1] - a[1]);
-  if (populated.length === 0) return "mixed";
+  if (populated.length !== 1) return "mixed";
   return populated[0]?.[0] ?? "mixed";
 };
 
 /** Draws hatch/dot fill patterns into a canvas and registers them with MapLibre. */
 export function ensurePatternImage(map: MlMap, pattern: FillPattern, color: string): string | null {
-  if (pattern === "solid") return null;
   const id = patternImageId(pattern, color);
   if (map.hasImage(id)) return id;
   const size = 16;
@@ -51,6 +54,7 @@ export function ensurePatternImage(map: MlMap, pattern: FillPattern, color: stri
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
   ctx.lineWidth = 2;
+  if (pattern === "solid") ctx.fillRect(0, 0, size, size);
 
   if (pattern === "diagonal" || pattern === "crosshatch") {
     ctx.beginPath();
@@ -112,7 +116,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
         id: imageId(layer.id),
         type: "raster",
         source: src,
-        paint: { "raster-opacity": Math.max(0, Math.min(1, s.fillOpacity)) },
+        paint: { "raster-opacity": Math.max(0, Math.min(1, s.fillOpacity)) * layerOpacity(s) },
       },
     ];
   const labelMinZoom = Math.max(0, Math.min(23, s.labelMinZoom ?? 4));
@@ -120,7 +124,10 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
   const categorized = s.categorized?.enabled && s.categorized.field ? s.categorized : undefined;
   const categorizedIcons =
     s.categorizedIcons?.enabled && s.categorizedIcons.field ? s.categorizedIcons : undefined;
-  const patternId = categorized ? null : ensurePatternImage(map, s.fillPattern, s.fillColor);
+  const patternId =
+    categorized || s.fillPattern === "solid"
+      ? null
+      : ensurePatternImage(map, s.fillPattern, s.fillColor);
   const zoomRange =
     layer.source.kind === "remote" && layer.source.minZoom !== undefined
       ? { minzoom: layer.source.minZoom }
@@ -140,8 +147,9 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
           fallback,
         ]
       : fallback;
-  const categoryOpacity = (opacity: number) =>
-    categorized && categoryValue
+  const categoryOpacity = (value: number) => {
+    const opacity = value * layerOpacity(s);
+    return categorized && categoryValue
       ? [
           "match",
           categoryValue,
@@ -149,6 +157,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
           categorized.fallbackVisible ? opacity : 0,
         ]
       : opacity;
+  };
   const iconValue = categorizedIcons
     ? ["to-string", ["coalesce", ["get", categorizedIcons.field], ""]]
     : undefined;
@@ -166,16 +175,64 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
   // stored on individual features. Feature-level icons remain available when
   // the layer is set to "Circle only".
   const usesLayerIcon = Boolean(categorizedIcons || s.pointIcon);
-  const markerText = usesLayerIcon ? categoryIcon : ["coalesce", ["get", "MARKER_ICON"], ""];
+  const markerText = usesLayerIcon
+    ? typeof categoryIcon === "string"
+      ? ["literal", categoryIcon]
+      : categoryIcon
+    : ["coalesce", ["get", "MARKER_ICON"], ""];
   const shownFilter = ["!", ["boolean", ["get", "__hidden"], false]];
   const geometryFilter = (filter: unknown[]) => ["all", filter, shownFilter];
   const fillPaint: Record<string, unknown> = patternId
-    ? { "fill-pattern": patternId, "fill-opacity": s.fillOpacity }
+    ? { "fill-pattern": patternId, "fill-opacity": s.fillOpacity * layerOpacity(s) }
     : {
         "fill-color": categoryMatch(categorized?.fallbackColor ?? s.fillColor),
         "fill-opacity": categoryOpacity(s.fillOpacity),
       };
 
+  const dashFor = (pattern: string) =>
+    pattern === "dashed" ? [3, 2] : pattern === "dotted" ? [0.2, 1.6] : [1, 0];
+  const attributeDash =
+    categorizedIcons && iconValue && categorizedIcons.rules.some((r) => r.strokePattern)
+      ? [
+          "match",
+          iconValue,
+          ...categorizedIcons.rules.flatMap((r) => [
+            r.value,
+            ["literal", dashFor(r.strokePattern ?? s.strokePattern)],
+          ]),
+          ["literal", dashFor(s.strokePattern)],
+        ]
+      : undefined;
+  if (categorized || categorizedIcons?.rules.some((r) => r.fillPattern)) {
+    const colorRules = categorized?.rules ?? [];
+    const patternRules = categorizedIcons?.rules ?? [];
+    const imageFor = (pattern: typeof s.fillPattern, color: string) =>
+      ensurePatternImage(map, pattern, color);
+    const baseImage = imageFor(s.fillPattern, categorized?.fallbackColor ?? s.fillColor);
+    const colorExpression = (pattern: typeof s.fillPattern) =>
+      categorized && categoryValue
+        ? [
+            "match",
+            categoryValue,
+            ...colorRules.flatMap((r) => [r.value, imageFor(pattern, r.color)]),
+            imageFor(pattern, categorized.fallbackColor),
+          ]
+        : imageFor(pattern, s.fillColor);
+    fillPaint["fill-pattern"] =
+      categorizedIcons && iconValue && patternRules.some((r) => r.fillPattern)
+        ? [
+            "match",
+            iconValue,
+            ...patternRules.flatMap((r) => [
+              r.value,
+              colorExpression(r.fillPattern ?? s.fillPattern),
+            ]),
+            colorExpression(s.fillPattern),
+          ]
+        : categorized && categoryValue
+          ? colorExpression(s.fillPattern)
+          : baseImage;
+  }
   const specs: LayerSpecification[] = [
     {
       id: fillId(layer.id),
@@ -206,7 +263,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
           ["to-number", ["coalesce", ["get", "BASE_HEIGHT_FT"], 0]],
           0.3048,
         ] as never,
-        "fill-extrusion-opacity": Math.max(0.35, Math.min(0.92, s.fillOpacity + 0.28)),
+        "fill-extrusion-opacity": Math.max(0, Math.min(1, s.fillOpacity)) * layerOpacity(s),
       },
       ...zoomRange,
     },
@@ -226,7 +283,9 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
         "line-color": categoryMatch(categorized?.fallbackColor ?? s.strokeColor) as never,
         "line-width": s.strokeWidth,
         "line-opacity": categoryOpacity(s.strokeOpacity) as never,
-        ...(lineDash ? { "line-dasharray": lineDash } : {}),
+        ...(attributeDash || lineDash
+          ? { "line-dasharray": (attributeDash ?? lineDash) as never }
+          : {}),
       },
       ...zoomRange,
     },
@@ -258,9 +317,12 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       paint: {
         "circle-radius": s.pointSize,
         "circle-color": categoryMatch(categorized?.fallbackColor ?? s.fillColor) as never,
-        "circle-opacity": categoryOpacity(Math.min(1, Math.max(0.5, s.fillOpacity + 0.4))) as never,
+        "circle-opacity": categoryOpacity(
+          Math.max(0, Math.min(1, s.fillOpacity)) * pointSymbolOpacity(s),
+        ) as never,
         "circle-stroke-color": categoryMatch(categorized?.fallbackColor ?? s.strokeColor) as never,
         "circle-stroke-width": Math.min(3, s.strokeWidth),
+        "circle-stroke-opacity": categoryOpacity(pointSymbolOpacity(s)) as never,
       },
       ...zoomRange,
     },
@@ -295,6 +357,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
             ]) as never,
         "text-halo-color": "#ffffff",
         "text-halo-width": 1.6,
+        "text-opacity": categoryOpacity(pointSymbolOpacity(s)) as never,
       },
       ...zoomRange,
     },
@@ -333,7 +396,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
     },
   ];
 
-  if (s.labelEnabled && s.labelTemplate.trim().length > 0) {
+  if (s.labelEnabled && (s.labelUseLayerName || s.labelTemplate.trim().length > 0)) {
     const geometry = primaryLabelGeometry(layer);
     const requestedPlacement = s.labelPlacement ?? "auto";
     const placement =
@@ -374,27 +437,34 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
                   ] as never)
                 : [0, 0];
     const labelSize = s.labelSize ?? 14;
-    const textSize = s.labelScaleWithZoom
-      ? [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          0,
-          Math.max(8, labelSize - 4),
-          16,
-          labelSize,
-          24,
-          Math.min(44, labelSize + 4),
-        ]
-      : labelSize;
-    specs.push({
+    const textSize =
+      isParcelLayer(layer) && s.labelScaleWithZoom
+        ? parcelLabelSizeExpression(labelSize)
+        : s.labelScaleWithZoom
+          ? [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              0,
+              Math.max(8, labelSize - 4),
+              16,
+              labelSize,
+              24,
+              Math.min(44, labelSize + 4),
+            ]
+          : labelSize;
+    const labelSpec: LayerSpecification = {
       id: labelId(layer.id),
       type: "symbol",
       source: src,
       filter: shownFilter as never,
       layout: {
-        "text-field": ["coalesce", ["get", "__label"], ""],
-        "text-font": [s.labelFont || "Open Sans Regular", "Arial Unicode MS Regular"],
+        "text-field": s.labelUseLayerName
+          ? ["literal", layer.name]
+          : ["coalesce", ["get", "__label"], ""],
+        // The raster basemap glyph host serves individual font stacks only.
+        // The former combined stack returns HTML (HTTP 200), not glyph data.
+        "text-font": [s.labelFont || "Open Sans Regular"],
         "text-size": textSize as never,
         "text-anchor": textAnchor,
         "text-offset": textOffset as never,
@@ -407,21 +477,53 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
         "text-rotation-alignment": followsLine ? "map" : "viewport",
         "symbol-placement": followsLine ? "line" : isHorizontalLine ? "line-center" : "point",
       } as never,
-      minzoom: labelMinZoom,
+      minzoom: Math.max(labelMinZoom, zoomRange.minzoom ?? 0),
       maxzoom: labelMaxZoom,
       paint: {
         "text-color": s.labelColor ?? "#1d2a20",
-        "text-opacity": s.labelOpacity ?? 1,
+        "text-opacity": (s.labelOpacity ?? 1) * layerOpacity(s),
         "text-halo-color": s.labelHaloColor ?? "#fdfbf3",
         "text-halo-width": s.labelHaloWidth ?? 1.6,
       },
-      ...zoomRange,
-    });
+    };
+    if (isParcelLayer(layer)) {
+      specs.push({
+        ...labelSpec,
+        source: parcelLabelSourceId(layer.id),
+        filter: ["all", shownFilter, ["<=", ["get", "__parcelLabelMinZoom"], ["zoom"]]] as never,
+        layout: {
+          ...labelSpec.layout,
+          "text-field": ["get", "__label"],
+          "symbol-placement": "point",
+          "text-anchor": "center",
+          "text-offset": [0, 0],
+          "text-max-width": 1000,
+          "text-pitch-alignment": "map",
+          "symbol-sort-key": ["get", "__parcelLabelPriority"],
+        },
+      });
+    } else if (geometry === "mixed" && requestedPlacement === "auto") {
+      specs.push({
+        ...labelSpec,
+        filter: ["all", shownFilter, ["!=", ["geometry-type"], "LineString"]] as never,
+      });
+      specs.push({
+        ...labelSpec,
+        id: labelId(layer.id) + "-lines",
+        filter: ["all", shownFilter, ["==", ["geometry-type"], "LineString"]] as never,
+        layout: {
+          ...labelSpec.layout,
+          "symbol-placement": "line",
+          "text-rotation-alignment": "map",
+        },
+      });
+    } else specs.push(labelSpec);
   }
   return specs;
 }
 
 export const allLayerIds = (layerId: string) => [
+  labelId(layerId) + "-lines",
   labelId(layerId),
   highlightPointId(layerId),
   highlightId(layerId),

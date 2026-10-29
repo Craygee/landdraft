@@ -54,3 +54,17 @@ test("unreviewed license never loads, and invalid spatial or query scope is expl
     /Clear the previous/,
   );
 });
+
+test("farther-out overview accepts a mobile extent while full-detail requests stay bounded", async (t) => {
+  t.mock.method(globalThis, "fetch", async () =>
+    Response.json({ ...manifest, license: "UNKNOWN" }),
+  );
+  const bbox: [number, number, number, number] = [-103, 33, -101, 36];
+  // Reaching license validation proves overview passed the spatial guard.
+  await assert.rejects(fetchTexasParcels({ bbox, parcelDisplayZoom: 8 }), /license/);
+  await assert.rejects(fetchTexasParcels({ bbox }), /Zoom in/);
+  await assert.rejects(
+    fetchTexasParcels({ bbox: [-106, 25, -93, 37], parcelDisplayZoom: 8 }),
+    /Zoom in/,
+  );
+});

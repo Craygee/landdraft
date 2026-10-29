@@ -342,6 +342,16 @@
   height: 54vh;
 }
 
+/* Safari auto-zooms focused small form fields, including on iPad desktop view.
+   Keep readable controls without disabling the user's pinch/browser zoom. */
+@media (max-width: 47.999rem), (any-pointer: coarse) {
+  .feature-destination-dialog input:not([type="checkbox"]):not([type="range"]):not([type="color"]),
+  .feature-destination-dialog select,
+  .feature-destination-dialog textarea {
+    font-size: 16px;
+  }
+}
+
 @media (max-width: 47.999rem) {
   /* iOS Safari zooms the page when a focused field renders below 16px. */
   .field-capture-sheet input,
@@ -625,7 +635,135 @@
     -webkit-print-color-adjust: exact;
   }
 
+  .print-composer-page [data-print-editor-only] { display: none !important; }
+  .print-composer-page [data-print-selected] {
+    --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+  }
+
   .print-composer-page .maplibregl-ctrl-top-left {
     display: none !important;
   }
+}
+
+/* The bottom navigation owns selection; drawing feedback occupies the space
+   above it instead of competing with search in the top rail. */
+.mobile-map-mode .landdraft-drawing-helper {
+  --tw-translate-x: 0px;
+  --tw-translate-y: 0px;
+  top: auto;
+  bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+  left: 0.5rem;
+  transform: none;
+  translate: none;
+  width: calc(100% - 4.5rem);
+  max-height: 38dvh;
+  overflow-y: auto;
+  z-index: 35;
+}
+.mobile-map-mode .mobile-selection-helper {
+  display: none;
+}
+body:has(.mobile-map-mode.mobile-has-panel) [data-connection-badge],
+body:has(.mobile-map-mode.mobile-is-drawing) [data-connection-badge] {
+  display: none;
+}
+.mobile-map-mode.mobile-is-drawing .mobile-layer-rail,
+.mobile-map-mode.mobile-is-drawing [data-tour="basemap-control"] {
+  display: none;
+}
+.mobile-map-mode.mobile-is-drawing .maplibregl-ctrl-bottom-right {
+  top: calc(8.25rem + env(safe-area-inset-top, 0px));
+  bottom: auto;
+}
+@media (max-height: 600px) {
+  .mobile-map-mode .map-legend-panel {
+    position: fixed;
+    top: calc(4.5rem + env(safe-area-inset-top, 0px));
+    bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+    right: 0.5rem;
+    max-height: none;
+    display: flex;
+    flex-direction: column;
+  }
+  .mobile-map-mode .map-legend-panel > div {
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+  }
+  .mobile-map-mode .mobile-layer-rail:has(section) {
+    position: fixed;
+    top: calc(4.5rem + env(safe-area-inset-top, 0px));
+    bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+    max-height: none;
+    overflow-y: auto;
+  }
+}
+@media (max-width: 767px) {
+  .mobile-map-mode .mobile-selection-helper {
+    display: none;
+  }
+}
+
+/* Keep connection status above mobile navigation, including landscape widths. */
+body:has(.mobile-map-mode, .mobile-field-mode) .connection-status-control {
+  bottom: calc(5.25rem + env(safe-area-inset-bottom, 0px));
+  right: auto;
+  left: .5rem;
+  max-width: calc(100vw - 5rem);
+}
+body:has(.mobile-field-mode.mobile-has-panel) [data-connection-badge],
+body:has(.mobile-field-mode.mobile-is-drawing) [data-connection-badge] {
+  display: none;
+}
+
+/* iOS keeps note editing at the page zoom and inside the safe viewport. */
+body:has(.mobile-map-mode, .mobile-field-mode) .project-records-panel input,
+body:has(.mobile-map-mode, .mobile-field-mode) .project-records-panel textarea,
+body:has(.mobile-map-mode, .mobile-field-mode) .project-records-panel select {
+  font-size: 16px;
+}
+body:has(.mobile-map-mode, .mobile-field-mode) .project-records-panel > section {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Elevation profiles reserve their measured height above existing mobile navigation. */
+body:has(.elevation-profile-panel) .maplibregl-ctrl-bottom-right,
+body:has(.elevation-profile-panel) .maplibregl-ctrl-bottom-left {
+  bottom: calc(var(--landdraft-profile-height, 300px) + 1rem);
+}
+.mobile-map-mode .elevation-profile-panel,
+.mobile-field-mode .elevation-profile-panel {
+  bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+  max-height: 43dvh;
+}
+body:has(.mobile-map-mode .elevation-profile-panel, .mobile-field-mode .elevation-profile-panel) .maplibregl-ctrl-bottom-right,
+body:has(.mobile-map-mode .elevation-profile-panel, .mobile-field-mode .elevation-profile-panel) .maplibregl-ctrl-bottom-left {
+  bottom: calc(var(--landdraft-profile-height, 300px) + 5rem + env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-height: 500px) {
+  body:has(.elevation-profile-panel[data-collapsed="false"]) .maplibregl-ctrl-bottom-right,
+  body:has(.elevation-profile-panel[data-collapsed="false"]) .maplibregl-ctrl-bottom-left {
+    display: none;
+  }
+}
+/* Analysis drawer stays clear of mobile navigation and can collapse while drawing. */
+.buildable-area-panel { top: 5rem; right: .75rem; bottom: 1rem; width: min(27rem, calc(100vw - 1.5rem)); overflow: clip; }
+.buildable-area-panel > header { flex-shrink: 0; }
+.buildable-area-panel > header button { min-width: 44px; flex-shrink: 0; }
+.buildable-area-panel.buildable-collapsed { bottom: auto; }
+.buildable-key { display: inline-block; width: 1.5rem; height: 1rem; border: 2px dashed currentColor; }
+.buildable-study { color: #173e9c; }
+.buildable-candidate { color: #176937; background: #25844d55; }
+.buildable-excluded { color: #ac2020; background: repeating-linear-gradient(45deg,#bf343455 0 3px,transparent 3px 6px); }
+.buildable-conditional { color: #a86c00; background: repeating-linear-gradient(-45deg,#d9951855 0 3px,transparent 3px 6px); }
+.buildable-reference { color: #64748b; }
+.buildable-unknown { color: #6d4b9e; background: #7660aa55; }
+@media (max-width: 767px) {
+  .buildable-area-panel { top: auto; left: .5rem; right: .5rem; bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)); width: auto; max-height: 55dvh; }
+  .buildable-area-panel.buildable-collapsed { top: auto; bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)); }
+  body:has(.buildable-area-panel) .maplibregl-ctrl-bottom-left,
+  body:has(.buildable-area-panel) .maplibregl-ctrl-bottom-right { display: none; }
 }

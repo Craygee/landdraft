@@ -154,7 +154,7 @@ export function ParcelSearchPanel({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="float-surface mt-2 max-h-[min(72vh,42rem)] w-full overflow-auto rounded-2xl p-3 sm:w-[34rem]">
+    <div className="float-surface mt-2 max-h-[min(42rem,calc(100dvh-12rem))] w-full overflow-auto rounded-2xl p-3 sm:w-[34rem]">
       <div className="mb-3 flex items-start gap-3">
         <div className="rounded-xl bg-primary/10 p-2 text-primary">
           <Database className="size-4" />

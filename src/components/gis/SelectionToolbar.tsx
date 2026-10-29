@@ -1,3 +1,4 @@
+import { DockableBar } from "./DockableBar";
 import { useMemo, useRef, useState } from "react";
 import {
   CopyPlus,
@@ -62,7 +63,7 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
     [wb.displayLayers, wb.selectedFeatures],
   );
   const first = selected[0];
-  if (!first) return null;
+  if (!first || !wb.canEditProject) return null;
 
   const preview = Object.entries(first.feature.properties ?? {})
     .filter(([key]) => !key.startsWith("__") && key !== "ATTACHMENTS")
@@ -185,12 +186,16 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
   };
 
   return (
-    <section
+    <DockableBar
+      label="selection actions"
+      centered
+      enabled={false}
       className={cn(
-        "panel-surface pointer-events-auto absolute left-1/2 z-30 w-[min(94vw,760px)] -translate-x-1/2 rounded-2xl p-2 shadow-float",
-        mobile ? "bottom-20" : "bottom-4",
+        "panel-surface pointer-events-auto absolute left-1/2 z-[60] w-[min(94vw,760px)] rounded-2xl p-2 shadow-float",
+        mobile
+          ? "bottom-[calc(4.5rem+env(safe-area-inset-bottom))] max-h-[45dvh] overflow-y-auto"
+          : "bottom-4",
       )}
-      aria-label="Selected feature actions"
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1 px-1">
@@ -219,6 +224,11 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
       </div>
 
       <div className="mt-2 flex gap-1 overflow-x-auto pb-0.5">
+        <Action
+          icon={<CopyPlus />}
+          label={selected.length > 1 ? "New layer from selection" : "New layer"}
+          onClick={createCombinedLayer}
+        />
         {typeof mapNoteId === "string" && mapNoteId && (
           <Action
             icon={<NotebookPen />}
@@ -242,11 +252,7 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
             setTableOpen(true);
           }}
         />
-        <Action
-          icon={<CopyPlus />}
-          label={selected.length > 1 ? "New layer from selection" : "New layer"}
-          onClick={createCombinedLayer}
-        />
+
         {selected.length === 1 &&
           first.layer.source.kind !== "remote" &&
           first.layer.source.kind !== "image" && (
@@ -374,7 +380,7 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
         className="hidden"
         onChange={(event) => void attachFile(event.target.files?.[0])}
       />
-    </section>
+    </DockableBar>
   );
 }
 

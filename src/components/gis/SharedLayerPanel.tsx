@@ -8,7 +8,7 @@ import { SharedMapSwitcher } from "./SharePanel";
 
 export function SharedLayerPanel() {
   const wb = useWorkbench();
-  const { map, setTableOpen } = useMapRef();
+  const { map, setTableOpen, setRecordsOpen } = useMapRef();
   const [expandedLayers, setExpandedLayers] = useState<Set<string>>(
     () =>
       new Set(
@@ -176,6 +176,14 @@ export function SharedLayerPanel() {
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         <div className="space-y-2">{rootGroups.map((group) => renderGroup(group.id, 0))}</div>
       </div>
+      {wb.canViewNotes && (
+        <button
+          className="mx-3 mb-2 rounded-xl bg-secondary px-3 py-2 text-left text-xs font-semibold"
+          onClick={() => setRecordsOpen(true)}
+        >
+          View project & layer notes
+        </button>
+      )}
       <div className="border-t border-sidebar-border p-3 text-[9px] leading-relaxed text-muted-foreground">
         Shared map access is limited to the layers and features selected by its administrator.
       </div>

@@ -22,6 +22,8 @@ jobs:
           python-version: "3.12"
       - name: Check public source and license
         run: node tools/texas-parcels-sync.mjs
+      - name: Test parcel source schema compatibility
+        run: python tools/test_texas_parcels_schema.py
       - name: Verify publisher credential and storage
         env:
           PARCEL_PUBLISH_TOKEN: ${{ secrets.PARCEL_PUBLISH_TOKEN }}

@@ -1,4 +1,11 @@
 import {
+  applySharePermissions,
+  refreshSharedNotes,
+  sharePermissions,
+  NEW_SHARE_PERMISSIONS,
+  type SharePermissions,
+} from "./sharePermissions";
+import {
   cloudConfigured,
   cloudDataRequest,
   cloudFunctionRequest,
@@ -26,6 +33,7 @@ export interface MapShare {
   layerScope: ShareLayerScope[];
   active: boolean;
   role: ShareRole;
+  permissions: SharePermissions;
   createdAt: number;
   updatedAt: number;
 }
@@ -65,7 +73,7 @@ interface ShareRow {
   owner_id: string;
   name: string;
   state_path: string;
-  map_view: MapViewState;
+  map_view: MapViewState & { sharePermissions?: SharePermissions };
   layer_scope: ShareLayerScope[];
   active: boolean;
   created_at: string;
@@ -151,6 +159,7 @@ const mapShare = (row: ShareRow, role: ShareRole): MapShare => ({
   statePath: row.state_path,
   mapView: row.map_view,
   layerScope: Array.isArray(row.layer_scope) ? row.layer_scope : [],
+  permissions: sharePermissions(row.map_view?.sharePermissions),
   active: row.active,
   role,
   createdAt: new Date(row.created_at).getTime(),
@@ -181,6 +190,7 @@ export function scopedShareState(
   liveLayers: GisLayer[],
   scope: ShareLayerScope[],
   mapView: MapViewState,
+  permissions: SharePermissions = NEW_SHARE_PERMISSIONS,
 ): ProjectState {
   const byId = new Map(scope.map((entry) => [entry.layerId, entry.featureIndexes]));
   const layers = liveLayers
@@ -217,14 +227,17 @@ export function scopedShareState(
       }
     }
   }
-  return {
-    ...clone(state),
-    mapView,
-    groups: state.groups.filter((group) => includedGroupIds.has(group.id)),
-    layers,
-    enabledSubprojectIds: [],
-    assistant: { messages: [], actions: [] },
-  };
+  return applySharePermissions(
+    {
+      ...clone(state),
+      mapView,
+      groups: state.groups.filter((group) => includedGroupIds.has(group.id)),
+      layers,
+      enabledSubprojectIds: [],
+      assistant: { messages: [], actions: [] },
+    },
+    permissions,
+  );
 }
 
 export const shareUrl = (shareId: string) => {
@@ -296,10 +309,17 @@ export const shareStore = {
     state: ProjectState;
     mapView: MapViewState;
     layerScope: ShareLayerScope[];
+    permissions?: SharePermissions;
   }): Promise<MapShare> {
     if (!cloudConfigured) throw new Error("Cloud sharing is not configured");
     const id = window.crypto.randomUUID();
-    const statePath = await uploadShareState(input.userId, input.projectId, id, input.state);
+    const permissions = input.permissions ?? NEW_SHARE_PERMISSIONS;
+    const statePath = await uploadShareState(
+      input.userId,
+      input.projectId,
+      id,
+      applySharePermissions(input.state, permissions),
+    );
     const rows = await cloudDataRequest<ShareRow[]>("/rest/v1/rpc/create_project_share", {
       method: "POST",
       body: JSON.stringify({
@@ -307,7 +327,7 @@ export const shareStore = {
         p_project_id: input.projectId,
         p_name: input.name.trim(),
         p_state_path: statePath,
-        p_map_view: input.mapView,
+        p_map_view: { ...input.mapView, sharePermissions: permissions },
         p_layer_scope: input.layerScope,
       }),
     });
@@ -323,22 +343,47 @@ export const shareStore = {
     mapView: MapViewState;
     layerScope: ShareLayerScope[];
     name?: string;
+    permissions?: SharePermissions;
   }): Promise<void> {
+    const permissions = input.permissions ?? input.share.permissions;
     const statePath = await uploadShareState(
       input.userId,
       input.share.projectId,
       input.share.id,
-      input.state,
+      applySharePermissions(input.state, permissions),
     );
     await cloudDataRequest(`/rest/v1/project_shares?id=eq.${encodeURIComponent(input.share.id)}`, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
       body: JSON.stringify({
         state_path: statePath,
-        map_view: input.mapView,
+        map_view: { ...input.mapView, sharePermissions: permissions },
         layer_scope: input.layerScope,
         ...(input.name ? { name: input.name.trim() } : {}),
       }),
+    });
+  },
+
+  async updatePermissions(input: {
+    share: MapShare;
+    userId: string;
+    permissions: SharePermissions;
+  }): Promise<void> {
+    const project = await workspaceProjectStore.load(input.userId, input.share.projectId);
+    if (!project)
+      throw new Error("The source project could not be loaded. Sharing options were not changed.");
+    const snapshot = await downloadSharedState(input.share.statePath);
+    const state = refreshSharedNotes(
+      snapshot,
+      project.state,
+      input.share.layerScope,
+      input.permissions,
+    );
+    await this.updateSnapshot({
+      ...input,
+      state,
+      mapView: input.share.mapView,
+      layerScope: input.share.layerScope,
     });
   },
 

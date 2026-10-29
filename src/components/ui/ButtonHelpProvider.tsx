@@ -2,11 +2,14 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
+import { tooltipPosition } from "@/lib/tooltipPosition";
 
 const STORAGE_KEY = "landdraft.button-help.v1";
 const CONTROL_SELECTOR =
@@ -78,6 +81,29 @@ export function ButtonHelpProvider({ children }: { children: ReactNode }) {
   const timerRef = useRef<number | null>(null);
   const activeControlRef = useRef<HTMLElement | null>(null);
   const hiddenTitleRef = useRef<{ control: HTMLElement; title: string } | null>(null);
+  const popupRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const popup = popupRef.current;
+    const control = activeControlRef.current;
+    if (!tooltip || !popup || !control) return;
+    const viewport = window.visualViewport;
+    const bounds = {
+      left: viewport?.offsetLeft ?? 0,
+      top: viewport?.offsetTop ?? 0,
+      width: viewport?.width ?? window.innerWidth,
+      height: viewport?.height ?? window.innerHeight,
+    };
+    popup.style.maxWidth = `${Math.max(1, Math.min(336, bounds.width - 24))}px`;
+    popup.style.maxHeight = `${Math.max(1, bounds.height - 24)}px`;
+    const position = tooltipPosition(
+      control.getBoundingClientRect(),
+      popup.getBoundingClientRect(),
+      bounds,
+    );
+    popup.style.left = `${position.x}px`;
+    popup.style.top = `${position.y}px`;
+    popup.style.visibility = "visible";
+  }, [tooltip]);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
@@ -168,6 +194,8 @@ export function ButtonHelpProvider({ children }: { children: ReactNode }) {
     document.addEventListener("pointerdown", hide, true);
     window.addEventListener("scroll", hide, true);
     window.addEventListener("resize", hide);
+    window.visualViewport?.addEventListener("resize", hide);
+    window.visualViewport?.addEventListener("scroll", hide);
     return () => {
       document.removeEventListener("pointerover", onPointerOver, true);
       document.removeEventListener("pointerout", onPointerOut, true);
@@ -176,6 +204,8 @@ export function ButtonHelpProvider({ children }: { children: ReactNode }) {
       document.removeEventListener("pointerdown", hide, true);
       window.removeEventListener("scroll", hide, true);
       window.removeEventListener("resize", hide);
+      window.visualViewport?.removeEventListener("resize", hide);
+      window.visualViewport?.removeEventListener("scroll", hide);
       hide();
     };
   }, [preferences.delayMs, preferences.enabled]);
@@ -192,19 +222,22 @@ export function ButtonHelpProvider({ children }: { children: ReactNode }) {
   return (
     <ButtonHelpContext.Provider value={value}>
       {children}
-      {tooltip && (
-        <div
-          role="tooltip"
-          className="pointer-events-none fixed z-[120] max-w-[min(21rem,calc(100vw-1.5rem))] -translate-x-1/2 rounded-xl border border-border bg-popover px-3 py-2 text-center text-xs font-medium leading-snug text-popover-foreground shadow-float"
-          style={{
-            left: tooltip.x,
-            top: tooltip.y,
-            transform: `translate(-50%, ${tooltip.above ? "-100%" : "0"})`,
-          }}
-        >
-          {tooltip.description}
-        </div>
-      )}
+      {tooltip &&
+        createPortal(
+          <div
+            ref={popupRef}
+            role="tooltip"
+            className="pointer-events-none fixed z-[120] w-max max-w-[min(21rem,calc(100vw-1.5rem))] overflow-hidden whitespace-normal break-words rounded-xl border border-border bg-popover px-3 py-2 text-center text-xs font-medium leading-snug text-popover-foreground shadow-float [overflow-wrap:anywhere]"
+            style={{
+              left: tooltip.x,
+              top: tooltip.y,
+              visibility: "hidden",
+            }}
+          >
+            {tooltip.description}
+          </div>,
+          document.body,
+        )}
     </ButtonHelpContext.Provider>
   );
 }

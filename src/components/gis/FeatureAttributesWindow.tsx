@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { selectionIdentity } from "@/lib/gis/stableSelection";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, ExternalLink, ListTree, X } from "lucide-react";
 
@@ -86,6 +87,7 @@ export function FeatureAttributesWindow() {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [filter, setFilter] = useState("");
+  const previousSelectionKey = useRef("");
 
   const selected = useMemo(
     () =>
@@ -96,19 +98,22 @@ export function FeatureAttributesWindow() {
       }),
     [wb.displayLayers, wb.selectedFeatures],
   );
-  const selectionKey = wb.selectedFeatures
-    .map((selection) => `${selection.layerId}:${selection.index}`)
+  const selectionKey = selected
+    .map(({ layer, feature }) => `${layer.id}:${selectionIdentity(feature)}`)
     .join("|");
 
   useEffect(() => {
+    if (previousSelectionKey.current === selectionKey) return;
+    previousSelectionKey.current = selectionKey;
     if (!selectionKey) {
       setOpen(false);
       return;
     }
     setActiveIndex(0);
     setFilter("");
-    setOpen(true);
-  }, [selectionKey]);
+    // Multi-selection is a map workflow; details remain an explicit action.
+    if (wb.drawMode !== "select-multiple" && wb.drawMode !== "select-box") setOpen(true);
+  }, [selectionKey, wb.drawMode]);
 
   useEffect(() => {
     if (activeIndex >= selected.length) setActiveIndex(Math.max(0, selected.length - 1));

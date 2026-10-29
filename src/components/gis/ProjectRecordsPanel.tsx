@@ -137,6 +137,7 @@ export function ProjectRecordsPanel() {
   const { map, setRecordsOpen, recordsTargetNoteId, setRecordsTargetNoteId } = useMapRef();
   const [tab, setTab] = useState<Tab>("notes");
   const [noteTitle, setNoteTitle] = useState("");
+  const [noteLayerId, setNoteLayerId] = useState("");
   const [noteBody, setNoteBody] = useState("");
   const [notePinned, setNotePinned] = useState(false);
   const [pendingNoteFiles, setPendingNoteFiles] = useState<File[]>([]);
@@ -435,11 +436,18 @@ export function ProjectRecordsPanel() {
       toast.error("Enter a note");
       return;
     }
+    const targetLayer = noteLayerId
+      ? wb.displayLayers.find((layer) => layer.id === noteLayerId)
+      : undefined;
+    if (noteLayerId && !targetLayer) {
+      toast.error("Choose an available layer for this note");
+      return;
+    }
     const now = Date.now();
     const id = window.crypto.randomUUID();
     const note: ProjectNote = {
       id,
-      title: noteTitle.trim() || "Project note",
+      title: noteTitle.trim() || (targetLayer ? "Layer note" : "Project note"),
       body,
       createdAt: now,
       updatedAt: now,
@@ -465,7 +473,9 @@ export function ProjectRecordsPanel() {
               data: file,
               source: "upload",
               uploadedBy: auth.user.name || auth.user.email,
-              projectNoteId: id,
+              ...(targetLayer
+                ? { layerId: targetLayer.id, layerNoteId: id }
+                : { projectNoteId: id }),
             }),
           );
         } catch (error) {
@@ -476,13 +486,31 @@ export function ProjectRecordsPanel() {
       }
       setProjectNoteAttachmentBusyId(null);
     }
+    const layerNote: LayerNoteRecord | null = targetLayer
+      ? {
+          id,
+          layerId: targetLayer.id,
+          subject: note.title,
+          body: note.body,
+          createdAt: note.createdAt,
+          updatedAt: note.updatedAt,
+          author: note.author,
+          includeInPacket: true,
+          pinned: note.pinned ?? false,
+          tags: [],
+        }
+      : null;
     update({
-      notes: [note, ...records.notes],
+      ...(layerNote
+        ? { layerNotes: [layerNote, ...records.layerNotes] }
+        : { notes: [note, ...records.notes] }),
       documents: [...attachments, ...records.documents],
     });
     wb.addProjectEvent({
       type: "note",
-      title: noteTitle.trim() || "Added project note",
+      title:
+        noteTitle.trim() ||
+        (targetLayer ? `Added note to ${targetLayer.name}` : "Added project note"),
       detail: body.slice(0, 180),
       relatedId: id,
     });
@@ -490,7 +518,7 @@ export function ProjectRecordsPanel() {
       wb.addProjectEvent({
         type: "upload",
         title: `Attached ${document.name} to ${note.title}`,
-        detail: `${formatBytes(document.size)} · Project note attachment`,
+        detail: `${formatBytes(document.size)} · ${targetLayer ? "Layer" : "Project"} note attachment`,
         relatedId: id,
       });
     setNoteTitle("");
@@ -498,8 +526,16 @@ export function ProjectRecordsPanel() {
     setNotePinned(false);
     setPendingNoteFiles([]);
     if (noteFileInput.current) noteFileInput.current.value = "";
-    setNoteEditor(note);
-    toast.success("Note added to this project");
+    if (layerNote) {
+      setLayerNoteEditor(layerNote);
+      setLayerNoteEditorTagText("");
+      setLayerNoteLayerFilter(targetLayer!.id);
+      setLayerNoteGroupFilter("all");
+      setLayerNoteTagFilter("all");
+      setLayerNoteQuery("");
+      setTab("layer-notes");
+    } else setNoteEditor(note);
+    toast.success(targetLayer ? "Note added to this layer" : "Note added to this project");
   };
 
   const saveEditedNote = () => {
@@ -981,7 +1017,12 @@ export function ProjectRecordsPanel() {
     inboundDomain && accountEmailAlias ? `${accountEmailAlias.localPart}@${inboundDomain}` : null;
 
   return (
-    <div className="app-overlay-viewport fixed inset-0 z-[95] flex justify-end bg-foreground/20 backdrop-blur-[2px]">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Project records and notes"
+      className="project-records-panel app-overlay-viewport fixed inset-0 z-[95] flex justify-end bg-foreground/20 backdrop-blur-[2px]"
+    >
       <section className="flex h-full w-full max-w-2xl flex-col border-l border-border bg-card shadow-float">
         <header className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
           <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
@@ -993,6 +1034,7 @@ export function ProjectRecordsPanel() {
           </div>
           <select
             value={wb.projectId}
+            disabled={busy || projectNoteAttachmentBusyId !== null}
             onChange={(event) => void wb.openProject(event.target.value)}
             className="hidden max-w-48 rounded-xl border border-border bg-secondary px-2 py-1.5 text-xs sm:block"
             aria-label="Filter records by project"
@@ -1012,6 +1054,21 @@ export function ProjectRecordsPanel() {
           </button>
         </header>
 
+        <label className="block shrink-0 border-b border-border px-4 py-2 text-xs font-semibold sm:hidden">
+          Project
+          <select
+            value={wb.projectId}
+            onChange={(event) => void wb.openProject(event.target.value)}
+            disabled={busy || projectNoteAttachmentBusyId !== null}
+            className="mt-1 min-h-11 w-full rounded-xl border border-border bg-secondary px-3 py-2 text-base"
+          >
+            {wb.projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <nav className="flex shrink-0 overflow-x-auto border-b border-border p-2">
           {tabs.map((item) => (
             <button
@@ -1032,6 +1089,21 @@ export function ProjectRecordsPanel() {
           {tab === "notes" && (
             <div className="space-y-4">
               <section className="rounded-2xl border border-border bg-secondary/40 p-3">
+                <label className="mb-2 block text-xs font-semibold">
+                  Save note to
+                  <select
+                    value={noteLayerId}
+                    onChange={(event) => setNoteLayerId(event.target.value)}
+                    className="mt-1 min-h-11 w-full rounded-xl border border-border bg-card px-3 py-2 text-base sm:text-sm"
+                  >
+                    <option value="">Project: {wb.projectName}</option>
+                    {wb.displayLayers.map((layer) => (
+                      <option key={layer.id} value={layer.id}>
+                        Layer: {layer.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label htmlFor="new-note-subject" className="text-[10px] font-semibold">
                   Subject
                 </label>
@@ -1049,7 +1121,7 @@ export function ProjectRecordsPanel() {
                   id="new-note-body"
                   value={noteBody}
                   onChange={(event) => setNoteBody(event.target.value)}
-                  placeholder="Add a project note…"
+                  placeholder={noteLayerId ? "Add a note to this layer…" : "Add a project note…"}
                   rows={4}
                   className="mt-1 w-full resize-y rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none focus:border-primary"
                 />
@@ -1484,6 +1556,19 @@ export function ProjectRecordsPanel() {
                   <Layers3 className="size-4 text-primary" />
                   <div>
                     <h3 className="text-xs font-semibold">Notes attached to map layers</h3>
+                    <button
+                      onClick={() => {
+                        setNoteLayerId(
+                          layerNoteLayerFilter !== "all"
+                            ? layerNoteLayerFilter
+                            : (wb.activeLayerId ?? wb.displayLayers[0]?.id ?? ""),
+                        );
+                        setTab("notes");
+                      }}
+                      className="mt-2 flex min-h-11 items-center gap-1 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"
+                    >
+                      <Plus className="size-4" /> Add layer note
+                    </button>
                     <p className="mt-0.5 text-[10px] text-muted-foreground">
                       Notes and their files, listed front to back in the same order as the Layers
                       panel.
@@ -1520,7 +1605,7 @@ export function ProjectRecordsPanel() {
                     aria-label="Filter layer notes by layer"
                   >
                     <option value="all">All layers</option>
-                    {wb.layers.map((layer) => (
+                    {wb.displayLayers.map((layer) => (
                       <option key={layer.id} value={layer.id}>
                         {layer.name}
                       </option>

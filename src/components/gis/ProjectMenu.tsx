@@ -29,6 +29,9 @@ type View = "projects" | "settings";
 export function ProjectMenu({ onClose }: { onClose: () => void }) {
   const wb = useWorkbench();
   const auth = useAuth();
+  const [movingProject, setMovingProject] = useState<string | null>(null);
+  const [destination, setDestination] = useState("");
+  const [savingMove, setSavingMove] = useState(false);
   const [newName, setNewName] = useState("");
   const [view, setView] = useState<View>("projects");
   const [subprojectName, setSubprojectName] = useState("");
@@ -89,6 +92,10 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
                   void wb.toggleSubprojectOverlay(project.id, enabled),
               }
             : {})}
+          onMove={() => {
+            setMovingProject(project.id);
+            setDestination("");
+          }}
           onOpen={() => void wb.openProject(project.id).then(onClose)}
           onDuplicate={() =>
             void wb
@@ -120,6 +127,58 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
             })
           }
         />
+        {movingProject === project.id && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3">
+            <label className="text-xs">
+              Move under project
+              <select
+                aria-label="Parent project"
+                value={destination}
+                onChange={(e) => setDestination(e.target.value)}
+                className="ml-2 rounded border border-border bg-card p-2"
+              >
+                <option value="">Choose parent</option>
+                {wb.projects
+                  .filter(
+                    (candidate) =>
+                      candidate.id !== project.id &&
+                      !projectAncestorIds(candidate.id, wb.projects).includes(project.id),
+                  )
+                  .map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <button
+              disabled={!destination || savingMove}
+              className="rounded bg-primary px-3 py-2 text-xs text-primary-foreground disabled:opacity-50"
+              onClick={async () => {
+                setSavingMove(true);
+                try {
+                  await wb.moveProject(project.id, destination);
+                  setExpandedProjects((current) => new Set([...current, destination]));
+                  setMovingProject(null);
+                  toast.success("Project moved to subproject");
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Could not move project");
+                } finally {
+                  setSavingMove(false);
+                }
+              }}
+            >
+              Move
+            </button>
+            <button
+              disabled={savingMove}
+              onClick={() => setMovingProject(null)}
+              className="px-2 py-2 text-xs"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
         {children.length > 0 && expanded && (
           <div className="space-y-1 border-l border-border pl-1">
             {children.map((child) => renderProjectTree(child, depth + 1))}
@@ -358,6 +417,7 @@ function ProjectRow({
   onToggleOverlay,
   onOpen,
   onDuplicate,
+  onMove,
   onPromote,
   onDelete,
   onNavigationChange,
@@ -372,6 +432,7 @@ function ProjectRow({
   onToggleOverlay?: (enabled: boolean) => void;
   onOpen: () => void;
   onDuplicate: () => void;
+  onMove: () => void;
   onPromote?: () => void;
   onDelete: () => void;
   onNavigationChange: (visibility: {
@@ -449,6 +510,14 @@ function ProjectRow({
         </button>
         <button onClick={onDuplicate} className="rounded-lg p-1.5 hover:bg-card" title="Duplicate">
           <Copy className="size-3.5" />
+        </button>
+        <button
+          onClick={onMove}
+          title="Make subproject / move under another project"
+          aria-label={`Move ${project.name} under another project`}
+          className="rounded-lg p-1.5 hover:bg-card"
+        >
+          <FolderPlus className="size-3.5" />
         </button>
         {onPromote && (
           <button

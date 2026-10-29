@@ -1,4 +1,3 @@
-import { siteAllowed } from '../_shared/site-access.ts';
 const OPENAI_RESPONSES_API = "https://api.openai.com/v1/responses";
 const GROQ_RESPONSES_API = "https://api.groq.com/openai/v1/responses";
 const NOMINATIM_API = "https://nominatim.openstreetmap.org";
@@ -106,7 +105,6 @@ const authenticate = async (request: Request) => {
     headers: { apikey: publicKey, authorization },
   });
   if (!response.ok) return null;
-  if (!await siteAllowed(url,publicKey,authorization)) return null;
   const user = (await response.json()) as { id?: string };
   return user.id ? user : null;
 };

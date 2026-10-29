@@ -1,3 +1,12 @@
+import { createPrintPreviewPdf } from "@/lib/gis/printPreviewPdf";
+import { downloadFile } from "@/lib/gis/export";
+import {
+  addAnalysisToComposition,
+  analysisPrintFrame,
+  analysisKind,
+  printAnalysisPanels,
+  svgDataUrl,
+} from "@/lib/gis/analysisArtifacts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
@@ -44,7 +53,8 @@ import { useAuth } from "@/lib/auth";
 import { createMapSnapshotBlob } from "@/lib/gis/mapPdf";
 import { uploadProjectAsset } from "@/lib/gis/projectRecords";
 import { PRINT_PAPER_OPTIONS, printPageGeometry } from "@/lib/gis/printLayout";
-import { LegendSwatch } from "./LegendSwatch";
+import { PrintLegend } from "./PrintLegend";
+import { buildParcelLabels, isParcelLayer, parcelLabelSourceId } from "@/lib/gis/parcelDisplay";
 
 const uid = () => window.crypto.randomUUID();
 
@@ -70,7 +80,7 @@ const defaultComposition = (
   showTitle: true,
   showLegend: true,
   showCompass: true,
-  showScale: true,
+  showScale: false,
   showDate: false,
   showAttribution: true,
   showProjectNotes: false,
@@ -93,7 +103,13 @@ const defaultComposition = (
 export function PrintComposer() {
   const wb = useWorkbench();
   const auth = useAuth();
-  const { map: liveMap, lastPoint, setPrintOpen } = useMapRef();
+  const {
+    map: liveMap,
+    lastPoint,
+    setPrintOpen,
+    pendingPrintAnalysisId,
+    setPendingPrintAnalysisId,
+  } = useMapRef();
   const liveView = liveMap
     ? {
         center: [liveMap.getCenter().lng, liveMap.getCenter().lat] as [number, number],
@@ -116,7 +132,7 @@ export function PrintComposer() {
         normalizedBase.legendItems?.[layer.id] ?? { visible: layer.visible, name: layer.name },
       ]),
     );
-    return {
+    const initial: PrintComposition = {
       ...defaultComposition(wb.projectName, wb.displayLayers, liveView),
       ...normalizedBase,
       furniture: {
@@ -132,7 +148,16 @@ export function PrintComposer() {
           : wb.displayLayers.filter((layer) => layer.visible).map((layer) => layer.id),
       legendItems,
     };
+    initial.showScale = false;
+    initial.frame = analysisPrintFrame(initial.frame, Boolean(initial.analysisLayerIds?.length));
+    return pendingPrintAnalysisId
+      ? addAnalysisToComposition(initial, pendingPrintAnalysisId, wb.layers)
+      : initial;
   });
+  useEffect(() => {
+    setPendingPrintAnalysisId(null);
+  }, [setPendingPrintAnalysisId]);
+  const analysisPanels = printAnalysisPanels(composition, wb.layers);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [placementMode, setPlacementMode] = useState<
     null | { kind: "line" | "arrow"; start?: { x: number; y: number } } | { kind: "callout" }
@@ -142,10 +167,14 @@ export function PrintComposer() {
   const mapFrameRef = useRef<HTMLDivElement>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const printMapRef = useRef<MlMap | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const pdfAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => pdfAbort.current?.abort(), []);
   const markerRefs = useRef<Marker[]>([]);
   const [mapReady, setMapReady] = useState(false);
   const [mapBearing, setMapBearing] = useState(liveView?.bearing ?? 0);
   const [mapRevision, setMapRevision] = useState(0);
+  const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
   const [saveMapCopy, setSaveMapCopy] = useState(false);
   const [mapCopyFormat, setMapCopyFormat] = useState<"png" | "pdf">("pdf");
   const [fittedPageScale, setFittedPageScale] = useState(1);
@@ -167,6 +196,11 @@ export function PrintComposer() {
     () => wb.displayLayers.filter((layer) => composition.legendItems[layer.id]?.visible),
     [composition.legendItems, wb.displayLayers],
   );
+  const printLegendNames = useMemo(
+    () => legendLayers.map((layer) => composition.legendItems[layer.id]?.name || layer.name),
+    [legendLayers, composition.legendItems],
+  );
+  const [printLegendSize, setPrintLegendSize] = useState({ width: 176, height: 100 });
   const selectedProjectNotes = wb.records.notes.filter((note) =>
     (composition.includedNoteIds !== undefined
       ? composition.includedNoteIds
@@ -177,13 +211,14 @@ export function PrintComposer() {
     0.55,
     Math.min(1.12, Math.min(composition.frame.width / 90, composition.frame.height / 78)),
   );
-  const scaleBar = useMemo(() => {
-    void mapRevision;
-    return mapReady && printMapRef.current ? measureScaleBar(printMapRef.current) : null;
-  }, [mapReady, mapRevision]);
-
   const update = useCallback((patch: Partial<PrintComposition>) => {
-    setComposition((current) => ({ ...current, ...patch }));
+    setComposition((current) => {
+      const next = { ...current, ...patch };
+      return {
+        ...next,
+        frame: analysisPrintFrame(next.frame, Boolean(next.analysisLayerIds?.length)),
+      };
+    });
   }, []);
 
   const updateAnnotation = useCallback((id: string, patch: Partial<PrintAnnotation>) => {
@@ -287,29 +322,53 @@ export function PrintComposer() {
   useEffect(() => {
     const map = printMapRef.current;
     if (!map || !mapReady) return;
-    const keep = new Set(includedLayers.map((layer) => sourceId(`print-${layer.id}`)));
+    const keep = new Set(
+      includedLayers.flatMap((layer) => [
+        sourceId(`print-${layer.id}`),
+        ...(isParcelLayer(layer) ? [parcelLabelSourceId(`print-${layer.id}`)] : []),
+      ]),
+    );
     for (const spec of map.getStyle().layers ?? []) {
       const sid = (spec as { source?: string }).source;
-      if (sid?.startsWith("src-print-") && !keep.has(sid)) map.removeLayer(spec.id);
+      if (
+        sid &&
+        (sid.startsWith("src-print-") || sid.startsWith("src-parcel-labels-print-")) &&
+        !keep.has(sid)
+      )
+        map.removeLayer(spec.id);
     }
     for (const sid of Object.keys(map.getStyle().sources ?? {})) {
-      if (sid.startsWith("src-print-") && !keep.has(sid)) map.removeSource(sid);
+      if (
+        (sid.startsWith("src-print-") || sid.startsWith("src-parcel-labels-print-")) &&
+        !keep.has(sid)
+      )
+        map.removeSource(sid);
     }
     for (const layer of [...includedLayers].reverse()) {
       const printLayer: GisLayer = { ...layer, id: `print-${layer.id}` };
       const sid = sourceId(printLayer.id);
-      const data: FeatureCollection = layer.style.labelTemplate.trim()
-        ? {
-            type: "FeatureCollection",
-            features: layer.data.features.map((feature) => ({
-              ...feature,
-              properties: {
-                ...(feature.properties ?? {}),
-                __label: composeLabel(feature as never, layer.style.labelTemplate),
-              },
-            })) as Feature[],
-          }
-        : layer.data;
+      const data: FeatureCollection =
+        layer.style.labelUseLayerName || layer.style.labelTemplate.trim()
+          ? {
+              type: "FeatureCollection",
+              features: layer.data.features.map((feature) => ({
+                ...feature,
+                properties: {
+                  ...(feature.properties ?? {}),
+                  __label: layer.style.labelUseLayerName
+                    ? layer.name
+                    : composeLabel(feature as never, layer.style.labelTemplate),
+                },
+              })) as Feature[],
+            }
+          : layer.data;
+      if (isParcelLayer(printLayer)) {
+        const labelSid = parcelLabelSourceId(printLayer.id);
+        const labels = buildParcelLabels(printLayer, data);
+        const labelSource = map.getSource(labelSid) as GeoJSONSource | undefined;
+        if (labelSource) labelSource.setData(labels);
+        else map.addSource(labelSid, { type: "geojson", data: labels });
+      }
       const source = map.getSource(sid);
       if (layer.source.kind === "image") {
         if (source) (source as ImageSource).setCoordinates(layer.source.coordinates);
@@ -321,11 +380,20 @@ export function PrintComposer() {
           });
       } else if (source) (source as GeoJSONSource).setData(data);
       else map.addSource(sid, { type: "geojson", data, generateId: true });
-      if (!allLayerIds(printLayer.id).some((id) => map.getLayer(id))) {
-        for (const spec of buildLayerSpecs(printLayer, map)) map.addLayer(spec);
-      }
+      for (const id of allLayerIds(printLayer.id)) if (map.getLayer(id)) map.removeLayer(id);
+      for (const spec of buildLayerSpecs(printLayer, map)) map.addLayer(spec);
       for (const id of allLayerIds(printLayer.id))
         if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "visible");
+    }
+    const labelOrder = [...includedLayers]
+      .reverse()
+      .sort(
+        (a, b) =>
+          Number(Boolean(a.style.labelUseLayerName)) - Number(Boolean(b.style.labelUseLayerName)),
+      );
+    for (const layer of labelOrder) {
+      for (const id of ["label-print-" + layer.id, "label-print-" + layer.id + "-lines"])
+        if (map.getLayer(id)) map.moveLayer(id);
     }
   }, [includedLayers, mapReady]);
 
@@ -663,10 +731,11 @@ export function PrintComposer() {
   };
 
   const saveMapToRecords = async () => {
+    if (!wb.canEditProject) return;
     const map = printMapRef.current;
     if (!map) throw new Error("The print map is not ready yet");
     if (!auth.user) throw new Error("Sign in before saving a map to Project records");
-    const blob = await createMapSnapshotBlob(map, mapCopyFormat);
+    const blob = await createMapSnapshotBlob(map, mapCopyFormat, analysisPanels);
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const fileName = `${composition.title || wb.projectName}-${stamp}.${mapCopyFormat}`;
     const document = await uploadProjectAsset({
@@ -702,57 +771,82 @@ export function PrintComposer() {
     }
   };
 
-  const printMap = async () => {
-    if (saveMapCopy) {
-      try {
-        await saveMapToRecords();
-      } catch (error) {
-        toast.error("The map copy could not be stored", {
-          description: error instanceof Error ? error.message : "Cloud storage is unavailable",
-        });
-        return;
-      }
+  const printMap = () => {
+    // Safari requires print() in the original tap handler, before any await.
+    // Optional cloud storage must never consume the browser's user activation.
+    if (saveMapCopy) void saveMapToRecordsSafely();
+    try {
+      window.print();
+      toast.info("If no print dialog opens, use Quick PDF beside Print.", { duration: 12000 });
+    } catch (error) {
+      toast.error("This browser could not open printing. Use Quick PDF.", {
+        description: error instanceof Error ? error.message : "Open in Safari for system printing.",
+      });
     }
-    window.print();
   };
 
-  const furnitureKeys: PrintFurnitureKey[] = ["legend", "compass", "scale", "attribution"];
+  const quickPdf = async () => {
+    const map = printMapRef.current;
+    const page = pageRef.current;
+    if (!map || !mapReady || !page) {
+      toast.error("Wait for the print map to load.");
+      return;
+    }
+    if (pdfAbort.current) return;
+    const abort = new AbortController();
+    pdfAbort.current = abort;
+    setPdfBusy(true);
+    const timeout = window.setTimeout(() => abort.abort(), 30000);
+    try {
+      map.triggerRepaint();
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      const blob = await createPrintPreviewPdf(
+        page,
+        composition.paper,
+        composition.orientation,
+        abort.signal,
+      );
+      const name = (composition.title || wb.projectName || "LandDraft_map")
+        .replace(/[^a-z0-9_-]+/gi, "_")
+        .slice(0, 100);
+      downloadFile(blob, `${name}.pdf`);
+    } catch (error) {
+      if (page.isConnected)
+        toast.error("PDF could not be created", {
+          description:
+            error instanceof Error
+              ? error.message
+              : "Wait for preview images to finish loading, then retry.",
+        });
+    } finally {
+      window.clearTimeout(timeout);
+      pdfAbort.current = null;
+      setPdfBusy(false);
+    }
+  };
+
+  const furnitureKeys: PrintFurnitureKey[] = ["legend", "compass", "attribution"];
   const furnitureVisible = (key: PrintFurnitureKey) =>
     key === "legend"
       ? composition.showLegend
       : key === "compass"
         ? composition.showCompass
-        : key === "scale"
-          ? composition.showScale && Boolean(scaleBar)
-          : composition.showAttribution;
+        : composition.showAttribution;
 
   const furnitureContent = (key: PrintFurnitureKey) => {
     if (key === "legend")
       return (
-        <div
-          className="overflow-hidden rounded-md border border-slate-300 bg-white/95 shadow"
-          style={{
-            width: `${Math.round(176 * furnitureScale)}px`,
-            maxHeight: `${Math.round(240 * furnitureScale)}px`,
-            padding: `${Math.max(5, Math.round(8 * furnitureScale))}px`,
-            fontSize: `${Math.max(7, 10 * furnitureScale)}px`,
-          }}
-        >
-          <strong>Legend</strong>
-          <div className="mt-1 space-y-1">
-            {legendLayers.map((layer) => (
-              <div key={layer.id} className="flex items-center gap-1.5">
-                <LegendSwatch layer={layer} scale={furnitureScale} />
-                <span className="truncate">
-                  {composition.legendItems[layer.id]?.name || layer.name}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <PrintLegend
+          layers={legendLayers}
+          names={printLegendNames}
+          groups={wb.groups}
+          grouped={composition.legendGroupLabels !== false}
+          onSize={setPrintLegendSize}
+        />
       );
     if (key === "compass") return <Compass bearing={mapBearing} scale={furnitureScale} />;
-    if (key === "scale" && scaleBar) return <PrintScaleBar {...scaleBar} scale={furnitureScale} />;
     return (
       <div
         className="max-w-[52cqw] rounded bg-white/85 px-1.5 py-1 leading-tight text-slate-600 shadow-sm"
@@ -784,7 +878,10 @@ export function PrintComposer() {
             A saved composition—your project map stays unchanged
           </p>
         </div>
-        <div data-tour="print-tools" className="ml-auto flex items-center gap-1">
+        <div
+          data-tour="print-tools"
+          className="ml-auto flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+        >
           <ComposerButton icon={<Type />} label="Text" onClick={() => addAnnotation("text")} />
           <ComposerButton
             icon={<Minus />}
@@ -824,25 +921,47 @@ export function PrintComposer() {
             }}
           />
           <ComposerButton icon={<RotateCcw />} label="Project view" onClick={resetView} />
-          <ComposerButton
-            icon={<Archive />}
-            label="Save to Maps"
-            onClick={() => void saveMapToRecordsSafely()}
-          />
-          <button
-            onClick={() => void printMap()}
-            data-tour="print-output"
-            className="ml-1 flex shrink-0 items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"
-          >
-            <Printer className="size-4" /> Print / Save PDF
-          </button>
+          {wb.canEditProject && (
+            <ComposerButton
+              icon={<Archive />}
+              label="Save to Maps"
+              onClick={() => void saveMapToRecordsSafely()}
+            />
+          )}
         </div>
+        <button
+          onClick={() => setMobileSettingsOpen((value) => !value)}
+          aria-expanded={mobileSettingsOpen}
+          className="shrink-0 rounded-xl bg-secondary px-2 py-2 text-xs md:hidden"
+        >
+          Settings
+        </button>
+        <button
+          onClick={printMap}
+          data-tour="print-output"
+          className="ml-1 flex shrink-0 items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"
+        >
+          <Printer className="size-4" /> Print
+        </button>
+        <button
+          onClick={() => void quickPdf()}
+          disabled={pdfBusy}
+          title="Download the complete preview as PDF, including titles, notes, annotations, legend and reports."
+          className="shrink-0 rounded-xl bg-secondary px-3 py-2 text-xs font-semibold"
+        >
+          {pdfBusy ? "Creating PDF…" : "Quick PDF"}
+        </button>
       </header>
 
       <div className="flex min-h-0 flex-1">
         <aside
           data-tour="print-settings"
-          className="print-composer-ui w-64 shrink-0 overflow-y-auto border-r border-border bg-card p-3 text-xs"
+          className={cn(
+            "print-composer-ui w-64 shrink-0 overflow-y-auto border-r border-border bg-card p-3 text-xs",
+            mobileSettingsOpen
+              ? "absolute inset-y-14 left-0 z-30 max-w-[85vw] shadow-xl md:static md:max-w-none md:shadow-none"
+              : "hidden md:block",
+          )}
         >
           <h2 className="mb-2 font-semibold">Page</h2>
           <div className="grid grid-cols-2 gap-2">
@@ -934,7 +1053,6 @@ export function PrintComposer() {
                 ["showTitle", "Title"],
                 ["showLegend", "Legend"],
                 ["showCompass", "Compass"],
-                ["showScale", "Scale"],
               ] as const
             ).map(([key, label]) => (
               <CheckOption
@@ -1036,11 +1154,6 @@ export function PrintComposer() {
                 onChange={(corner) => setFurnitureCorner("compass", corner)}
               />
               <FurniturePlacementControl
-                label="Scale bar"
-                value={composition.furniture.scale.corner}
-                onChange={(corner) => setFurnitureCorner("scale", corner)}
-              />
-              <FurniturePlacementControl
                 label="Source credit"
                 value={composition.furniture.attribution.corner}
                 onChange={(corner) => setFurnitureCorner("attribution", corner)}
@@ -1048,11 +1161,50 @@ export function PrintComposer() {
             </div>
           </details>
 
+          <section className="space-y-2 rounded-xl border p-3">
+            <h3 className="font-semibold">Analysis reports</h3>
+            <p className="text-xs">
+              Add one saved Buildable Area report and one elevation profile. The map frame leaves
+              room below.
+            </p>
+            {wb.layers
+              .filter((l) => analysisKind(l))
+              .map((l) => (
+                <label key={l.id} className="flex min-h-11 items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={composition.analysisLayerIds?.includes(l.id) ?? false}
+                    onChange={(e) =>
+                      setComposition((c) =>
+                        e.target.checked
+                          ? addAnalysisToComposition(c, l.id, wb.layers)
+                          : {
+                              ...c,
+                              analysisLayerIds: (c.analysisLayerIds ?? []).filter(
+                                (id) => id !== l.id,
+                              ),
+                            },
+                      )
+                    }
+                  />
+                  {l.name}
+                </label>
+              ))}
+          </section>
           <details className="group mt-3 rounded-xl border border-border">
             <summary className="cursor-pointer list-none px-3 py-2 font-semibold">
               Map layers
             </summary>
             <div className="space-y-1 border-t border-border p-2">
+              <label className="flex items-center gap-2 px-1 py-2 text-xs">
+                <input
+                  type="checkbox"
+                  className="accent-primary"
+                  checked={composition.legendGroupLabels !== false}
+                  onChange={(event) => update({ legendGroupLabels: event.target.checked })}
+                />
+                List legend layers under group labels
+              </label>
               <div className="grid grid-cols-[auto_auto_1fr] gap-2 px-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
                 <span>Map</span>
                 <span>Key</span>
@@ -1206,6 +1358,7 @@ export function PrintComposer() {
               onClick={() =>
                 update({
                   annotations: [],
+                  analysisLayerIds: [],
                   frame: defaultPrintFrame(composition.paper, composition.orientation),
                 })
               }
@@ -1268,6 +1421,7 @@ export function PrintComposer() {
               )}
               <div
                 ref={mapFrameRef}
+                data-print-map-frame
                 className={cn(
                   "absolute overflow-hidden bg-slate-100 [container-type:inline-size]",
                   composition.frameBorder && "ring-1 ring-slate-700",
@@ -1324,8 +1478,14 @@ export function PrintComposer() {
                       key={key}
                       className="pointer-events-auto absolute z-20 -translate-x-1/2 -translate-y-1/2 cursor-move touch-none"
                       style={{
-                        left: `${composition.furniture[key].x}%`,
-                        top: `${composition.furniture[key].y}%`,
+                        left:
+                          key === "legend"
+                            ? `clamp(${printLegendSize.width / 2 + 8}px, ${composition.furniture[key].x}%, calc(100% - ${printLegendSize.width / 2 + 8}px))`
+                            : `${composition.furniture[key].x}%`,
+                        top:
+                          key === "legend"
+                            ? `clamp(${printLegendSize.height / 2 + 8}px, ${composition.furniture[key].y}%, calc(100% - ${printLegendSize.height / 2 + 8}px))`
+                            : `${composition.furniture[key].y}%`,
                       }}
                       onPointerDown={(event) => startFurnitureDrag(event, key)}
                       title={`Drag ${furnitureLabel(key)} to reposition it`}
@@ -1335,6 +1495,21 @@ export function PrintComposer() {
                   ))}
               </div>
 
+              {analysisPanels.length > 0 && (
+                <div
+                  className="absolute z-20 flex gap-2 bg-white"
+                  style={{ left: "4%", top: "73%", width: "92%", height: "24%" }}
+                >
+                  {analysisPanels.map((p) => (
+                    <img
+                      key={p.id}
+                      src={svgDataUrl(p.svg)}
+                      alt={p.title}
+                      className="h-full min-w-0 flex-1 border bg-white object-contain"
+                    />
+                  ))}
+                </div>
+              )}
               <svg className="pointer-events-none absolute inset-0 z-30 h-full w-full overflow-visible">
                 <defs>
                   <marker
@@ -1381,6 +1556,7 @@ export function PrintComposer() {
                           <circle
                             cx={`${item.x}%`}
                             cy={`${item.y}%`}
+                            data-print-editor-only
                             r="7"
                             fill="white"
                             stroke={item.color}
@@ -1391,6 +1567,7 @@ export function PrintComposer() {
                           <circle
                             cx={`${item.x2}%`}
                             cy={`${item.y2}%`}
+                            data-print-editor-only
                             r="7"
                             fill="white"
                             stroke={item.color}
@@ -1432,6 +1609,7 @@ export function PrintComposer() {
                 .map((item) => (
                   <button
                     key={item.id}
+                    data-print-selected={selectedId === item.id ? "true" : undefined}
                     onClick={() => setSelectedId(item.id)}
                     onPointerDown={(event) => startBoxDrag(event, item)}
                     className={cn(
@@ -1458,6 +1636,7 @@ export function PrintComposer() {
                 .map((item) => (
                   <button
                     key={item.id}
+                    data-print-selected={selectedId === item.id ? "true" : undefined}
                     onClick={() => setSelectedId(item.id)}
                     onPointerDown={(event) => startBoxDrag(event, item)}
                     className={cn(
@@ -1510,6 +1689,7 @@ export function PrintComposer() {
                 <div
                   className="absolute inset-0 z-[60] cursor-crosshair bg-transparent"
                   onPointerDown={handlePlacement}
+                  data-print-editor-only
                   aria-label="Print item placement surface"
                 />
               )}
@@ -1784,29 +1964,6 @@ function Compass({ bearing, scale }: { bearing: number; scale: number }) {
   );
 }
 
-function PrintScaleBar({
-  label,
-  widthPercent,
-  scale,
-}: {
-  label: string;
-  widthPercent: number;
-  scale: number;
-}) {
-  return (
-    <div
-      className="rounded bg-white/90 px-1.5 py-1 text-slate-800 shadow-sm"
-      style={{
-        width: `clamp(54px, ${widthPercent}cqw, 126px)`,
-        fontSize: `${Math.max(6, 9 * scale)}px`,
-      }}
-    >
-      <div className="mb-0.5 text-center font-semibold leading-none">{label}</div>
-      <div className="h-1.5 w-full border-x-2 border-b-2 border-slate-900" />
-    </div>
-  );
-}
-
 function FurniturePlacementControl({
   label,
   value,
@@ -1991,49 +2148,4 @@ function toDms(value: number, latitude: boolean) {
 
 function furnitureLabel(key: PrintFurnitureKey) {
   return key === "attribution" ? "source credit" : key === "scale" ? "scale bar" : key;
-}
-
-function measureScaleBar(map: MlMap) {
-  const container = map.getContainer();
-  const width = container.clientWidth;
-  const height = container.clientHeight;
-  if (!width || !height) return null;
-  const targetPixels = Math.max(52, Math.min(112, width * 0.22));
-  const a = map.unproject([width / 2 - targetPixels / 2, height / 2]);
-  const b = map.unproject([width / 2 + targetPixels / 2, height / 2]);
-  const availableMeters = haversineMeters(a.lat, a.lng, b.lat, b.lng);
-  const availableMiles = availableMeters / 1609.344;
-  const useMiles = availableMiles >= 0.2;
-  const available = useMiles ? availableMiles : availableMeters * 3.28084;
-  const distance = niceDistance(available);
-  const actualPixels = targetPixels * (distance / available);
-  return {
-    label: useMiles ? `${formatScaleNumber(distance)} mi` : `${formatScaleNumber(distance)} ft`,
-    widthPercent: Math.max(8, Math.min(34, (actualPixels / width) * 100)),
-  };
-}
-
-function niceDistance(maximum: number) {
-  if (!Number.isFinite(maximum) || maximum <= 0) return 1;
-  const power = 10 ** Math.floor(Math.log10(maximum));
-  const normalized = maximum / power;
-  const step = normalized >= 5 ? 5 : normalized >= 2 ? 2 : 1;
-  return step * power;
-}
-
-function formatScaleNumber(value: number) {
-  if (value >= 10) return Math.round(value).toLocaleString();
-  if (value >= 1) return Number(value.toFixed(1)).toString();
-  return Number(value.toFixed(2)).toString();
-}
-
-function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number) {
-  const radians = (degrees: number) => (degrees * Math.PI) / 180;
-  const earthRadius = 6_371_008.8;
-  const deltaLat = radians(lat2 - lat1);
-  const deltaLng = radians(lng2 - lng1);
-  const a =
-    Math.sin(deltaLat / 2) ** 2 +
-    Math.cos(radians(lat1)) * Math.cos(radians(lat2)) * Math.sin(deltaLng / 2) ** 2;
-  return 2 * earthRadius * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }

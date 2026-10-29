@@ -1,8 +1,11 @@
+import { siteConstraintsCatalog } from "./siteConstraintsCatalog.ts";
+import { infrastructureCatalog } from "./infrastructureCatalog.ts";
 export type CatalogCategory =
   | "Property"
   | "Oil & Gas"
   | "Water"
   | "Energy"
+  | "Communications"
   | "Transportation"
   | "Boundaries"
   | "Environment"
@@ -24,6 +27,7 @@ export interface CatalogEntry {
   requiresViewport?: boolean;
   minZoom?: number;
   countyField?: string;
+  where?: string;
   connection: ConnectionType;
   updateCadence: string;
   states: string[] | "US";
@@ -35,6 +39,8 @@ const live = { connection: "live" as const, updateCadence: "Publisher managed" }
 
 /** Curated public-agency services. Download records are clearly marked and never masquerade as APIs. */
 export const catalog: CatalogEntry[] = [
+  ...siteConstraintsCatalog,
+  ...infrastructureCatalog,
   tx({
     id: "tx-parcels",
     name: "Texas Land Parcels — Statewide",
@@ -44,12 +50,12 @@ export const catalog: CatalogEntry[] = [
     connection: "refresh",
     updateCadence: "County editions vary; generally annual",
     description:
-      "Statewide TxGIO 2025 archive, stored by LandDraft and queried by map area. 253 counties; Donley is absent from this release. Original county dates and appraisal attributes are preserved. Not a survey.",
+      "Statewide TxGIO 2025 archive, stored by LandDraft and queried by map area. 253 counties; Donley is absent from this release. Borders from zoom 10; large-parcel labels from zoom 11 grow to normal size at zoom 13. Full parcel detail at zoom 12+. Original county dates and appraisal attributes are preserved. Not a survey.",
     url: "https://landdraft-public-parcels.tight-sky-0ae1.workers.dev/texas/current.json",
     sourcePage: "https://gio.texas.gov/stratmap/land-parcels.html",
     keywords: ["parcel", "property", "tax", "owner", "appraisal", "cad"],
     requiresViewport: true,
-    minZoom: 12,
+    minZoom: 10,
     countyField: "county",
     license:
       "CC0-1.0 — TxGIO collection license. Contributing appraisal districts; provided AS-IS, not authoritative cadastral surveys.",
@@ -485,14 +491,33 @@ export const catalog: CatalogEntry[] = [
 ];
 
 export const categories = Array.from(new Set(catalog.map((entry) => entry.category)));
+// Move user-requested default removals here, retaining their reconnect metadata.
+export const retiredCatalog: CatalogEntry[] = [];
+export const SURFACE_WATER_CATEGORY = "Surface water & wetlands";
+const surfaceWaterIds = new Set([
+  "nhd-flowlines",
+  "usgs-waterbodies",
+  "usgs-water-areas",
+  "usgs-hydro-points",
+  "usgs-watersheds-huc12",
+  "usgs-watersheds-huc8",
+  "fws-wetlands",
+  "fws-riparian",
+]);
 export function searchCatalog(
   query: string,
   category: string | null,
   states: string[] = ["TX"],
+  restoredDefaults: Record<string, boolean> = {},
 ): CatalogEntry[] {
   const q = query.trim().toLowerCase();
-  return catalog.filter((entry) => {
-    if (category && entry.category !== category) return false;
+  return [
+    ...catalog,
+    ...retiredCatalog.filter((entry) => restoredDefaults[`catalog:${entry.id}`]),
+  ].filter((entry) => {
+    if (category === SURFACE_WATER_CATEGORY) {
+      if (!surfaceWaterIds.has(entry.id)) return false;
+    } else if (category && entry.category !== category) return false;
     if (entry.states !== "US" && !entry.states.some((state) => states.includes(state)))
       return false;
     return (

@@ -18,6 +18,8 @@ export interface IconStyleRule {
   value: string;
   label: string;
   icon: string;
+  strokePattern?: StrokePattern;
+  fillPattern?: FillPattern;
 }
 
 export interface CategorizedIconStyle {
@@ -39,6 +41,8 @@ export type LabelPlacement =
   "auto" | "center" | "above" | "below" | "left" | "right" | "follow-line" | "horizontal";
 
 export interface LayerStyle {
+  /** Master opacity multiplies fill, stroke, symbols and labels without changing category colors. */
+  opacity?: number;
   fillColor: string;
   fillOpacity: number;
   fillPattern: FillPattern;
@@ -50,7 +54,9 @@ export interface LayerStyle {
   pointIcon: string;
   pointIconColor: string | null;
   pointIconSize: number;
+  pointIconOpacity?: number;
   categorizedIcons?: CategorizedIconStyle;
+  labelUseLayerName?: boolean;
   labelTemplate: string;
   labelFields: string[];
   labelSeparator: string;
@@ -66,6 +72,7 @@ export interface LayerStyle {
   labelHaloWidth: number;
   labelPlacement: LabelPlacement;
   labelAllowOverlap: boolean;
+  labelCollisionMode?: "always" | "avoid";
   labelMaxWidth: number;
   labelLineSpacing: number;
   categorized?: CategorizedStyle;
@@ -110,6 +117,8 @@ export type LayerSource =
   | {
       kind: "remote";
       url: string;
+      accountServiceId?: string;
+      accountOwnerId?: string;
       catalogId?: string;
       attribution?: string;
       where?: string;
@@ -124,9 +133,12 @@ export type LayerSource =
       loadedFeatures?: number;
       expectedFeatures?: number;
       loadError?: string;
+      displayDetail?: "overview" | "full";
+      parcelDisplayVersion?: number;
     };
 
 export interface GisLayer {
+  selectionLocked?: boolean;
   id: string;
   name: string;
   note?: string;
@@ -210,6 +222,7 @@ export type PrintFurnitureKey = "legend" | "compass" | "scale" | "attribution";
 export type PrintPaper = "letter" | "legal" | "tabloid" | "a5" | "a4" | "a3";
 
 export interface PrintComposition {
+  analysisLayerIds?: string[];
   title: string;
   subtitle: string;
   paper: PrintPaper;
@@ -227,6 +240,7 @@ export interface PrintComposition {
   furniture: Record<PrintFurnitureKey, PrintFurniturePosition>;
   includedLayerIds: string[];
   legendItems: Record<string, { visible: boolean; name: string }>;
+  legendGroupLabels?: boolean;
   annotations: PrintAnnotation[];
   mapView?: { center: [number, number]; zoom: number; bearing: number; pitch: number };
 }
@@ -421,6 +435,7 @@ export const defaultStyle = (seed = 0): LayerStyle => {
     pointIcon: "",
     pointIconColor: null,
     pointIconSize: 18,
+    pointIconOpacity: 1,
     labelTemplate: "",
     labelFields: [],
     labelSeparator: " · ",

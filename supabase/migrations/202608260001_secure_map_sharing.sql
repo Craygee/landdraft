@@ -468,3 +468,6 @@ for each row execute function public.set_updated_at();
 grant select, insert, update, delete on public.project_shares to authenticated;
 grant select, insert, update, delete on public.share_members to authenticated;
 grant select, insert, update on public.share_submissions to authenticated;
+
+-- Explicit server access: do not depend on Supabase automatic Data API grants.
+grant select, insert, update, delete on public.project_shares, public.share_members, public.share_submissions to service_role;

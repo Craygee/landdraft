@@ -1,3 +1,4 @@
+import { SharedNotesPanel } from "./SharedNotesPanel";
 import { WorkspaceLoading, WorkspaceRecoveryNotice } from "./WorkspaceLoading";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
@@ -21,6 +22,9 @@ import { SharedLayerPanel } from "./SharedLayerPanel";
 import { ConnectionManager } from "./ConnectionManager";
 import { MapNoteDialog } from "./MapNoteDialog";
 import { FeatureAttributesWindow } from "./FeatureAttributesWindow";
+import { MapLegendControl } from "./MapLegendControl";
+import { AccountPublicDataProvider } from "@/lib/gis/AccountPublicData";
+import { AccountServiceLayers } from "./AccountServiceLayers";
 
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
@@ -28,8 +32,14 @@ const AiAssistant = lazy(() =>
 const PrintComposer = lazy(() =>
   import("./PrintComposer").then((module) => ({ default: module.PrintComposer })),
 );
+const ElevationProfilePanel = lazy(() =>
+  import("./ElevationProfilePanel").then((module) => ({ default: module.ElevationProfilePanel })),
+);
 const SpatialAnalysisPanel = lazy(() =>
   import("./SpatialAnalysisPanel").then((module) => ({ default: module.SpatialAnalysisPanel })),
+);
+const BuildableAreaPanel = lazy(() =>
+  import("./BuildableAreaPanel").then((module) => ({ default: module.BuildableAreaPanel })),
 );
 const ProjectRecordsPanel = lazy(() =>
   import("./ProjectRecordsPanel").then((module) => ({ default: module.ProjectRecordsPanel })),
@@ -41,18 +51,21 @@ const SiteDesignerPanel = lazy(() =>
 export default function Workbench() {
   return (
     <AuthGate>
-      <WorkbenchProvider>
-        <MapRefProvider>
-          <TourProvider>
-            <WorkbenchShell />
-            <RemoteLayerManager />
-            <FeatureDestinationDialog />
-            <MapNoteDialog />
-            <ConnectionManager />
-            <Toaster />
-          </TourProvider>
-        </MapRefProvider>
-      </WorkbenchProvider>
+      <AccountPublicDataProvider>
+        <WorkbenchProvider>
+          <MapRefProvider>
+            <TourProvider>
+              <WorkbenchShell />
+              <RemoteLayerManager />
+              <AccountServiceLayers />
+              <FeatureDestinationDialog />
+              <MapNoteDialog />
+              <ConnectionManager />
+              <Toaster />
+            </TourProvider>
+          </MapRefProvider>
+        </WorkbenchProvider>
+      </AccountPublicDataProvider>
     </AuthGate>
   );
 }
@@ -60,7 +73,15 @@ export default function Workbench() {
 function WorkbenchShell() {
   const [panelOpen, setPanelOpen] = useState(true);
   const wb = useWorkbench();
-  const { assistantOpen, printOpen, analysisOpen, recordsOpen, siteDesignerOpen } = useMapRef();
+  const {
+    assistantOpen,
+    printOpen,
+    analysisOpen,
+    elevationProfileOpen,
+    buildableAreaOpen,
+    recordsOpen,
+    siteDesignerOpen,
+  } = useMapRef();
 
   useEffect(() => {
     if (window.innerWidth < 768) setPanelOpen(false);
@@ -87,13 +108,14 @@ function WorkbenchShell() {
         <main className="relative min-w-0 flex-1">
           <MapCanvas />
           <FeatureAttributesWindow />
+          <div className="absolute right-3 top-20 z-30">
+            <MapLegendControl />
+          </div>
           {wb.canEditProject && <SelectionToolbar />}
 
           <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col gap-2 p-3">
             <div className="pointer-events-auto flex flex-wrap items-start justify-between gap-2">
-              <div data-tour="map-search">
-                <SearchBox />
-              </div>
+              <div data-tour="map-search">{wb.canSearchMap && <SearchBox />}</div>
               {wb.canEditProject && (
                 <div className="hidden md:block">
                   <div data-tour="draw-toolbar">
@@ -119,12 +141,12 @@ function WorkbenchShell() {
           </div>
 
           <DataDrawer />
-          {analysisOpen && (
+          {analysisOpen && wb.canEditProject && (
             <Suspense fallback={null}>
               <SpatialAnalysisPanel />
             </Suspense>
           )}
-          {assistantOpen && (
+          {assistantOpen && wb.canUseAi && (
             <Suspense fallback={null}>
               <AiAssistant />
             </Suspense>
@@ -133,11 +155,22 @@ function WorkbenchShell() {
       </div>
 
       <AttributeTable />
+      {buildableAreaOpen && wb.canEditProject && (
+        <Suspense fallback={null}>
+          <BuildableAreaPanel />
+        </Suspense>
+      )}
+      {elevationProfileOpen && wb.canEditProject && (
+        <Suspense fallback={null}>
+          <ElevationProfilePanel />
+        </Suspense>
+      )}
       {printOpen && (
         <Suspense fallback={null}>
           <PrintComposer />
         </Suspense>
       )}
+      {recordsOpen && !wb.canEditProject && wb.canViewNotes && <SharedNotesPanel />}
       {recordsOpen && wb.canEditProject && (
         <Suspense fallback={null}>
           <ProjectRecordsPanel />

@@ -129,7 +129,7 @@ export function FeatureDestinationDialog() {
     }
   }, [labelAttributes, pending, pointFeaturesOnly]);
 
-  if (!pending) return null;
+  if (!pending || !wb.canEditProject) return null;
   const effectiveLayerName = layerName || pending.suggestedLayerName;
   const effectiveFeatureName = featureName || pending.suggestedFeatureName || "";
   const effectiveGroupId = groupId || pending.defaultGroupId;
@@ -235,7 +235,7 @@ export function FeatureDestinationDialog() {
   return (
     <div className="app-overlay-viewport fixed inset-0 z-[110] flex items-center justify-center overflow-y-auto bg-foreground/25 p-4 backdrop-blur-[2px]">
       <section
-        className="panel-surface w-full max-w-md rounded-3xl p-4 shadow-2xl"
+        className="feature-destination-dialog panel-surface w-full max-w-md rounded-3xl p-4 shadow-2xl"
         role="dialog"
         aria-modal="true"
       >

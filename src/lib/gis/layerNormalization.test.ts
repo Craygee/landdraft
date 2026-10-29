@@ -7,6 +7,16 @@ import {
   normalizeLayerStyle,
 } from "./layerNormalization.ts";
 
+test("recovers label template from saved label field selections", () => {
+  const style = normalizeLayerStyle({
+    labelEnabled: true,
+    labelFields: ["OWNER_NAME"],
+    labelTemplate: "",
+  });
+  assert.equal(style.labelTemplate, "{OWNER_NAME}");
+  assert.equal(style.labelEnabled, true);
+});
+
 test("keeps field attributes while neutralizing an interrupted geometry capture", () => {
   const data = normalizeLayerData({
     type: "FeatureCollection",

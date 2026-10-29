@@ -77,6 +77,12 @@ export default {
           const response = await handleWeatherPointRequest(request);
           if (response) return applyEnvironmentHeaders(response);
         }
+        if (new URL(request.url).pathname === "/api/analysis/buildable-terrain") {
+          const { handleBuildableTerrainRequest } =
+            await import("./lib/gis/buildableTerrain.server");
+          const response = await handleBuildableTerrainRequest(request);
+          if (response) return applyEnvironmentHeaders(response);
+        }
         if (new URL(request.url).pathname === "/api/pipeline/elevation") {
           const { handlePipelineElevationRequest } = await import("./lib/pipeline/terrain.server");
           const response = await handlePipelineElevationRequest(request);

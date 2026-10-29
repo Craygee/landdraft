@@ -1,8 +1,9 @@
 import { basemapProbeUrl, basemaps, saveBasemapUrlOverride, setBasemapFallback } from "./basemaps";
-import { catalog, type CatalogEntry } from "./catalog";
+import { catalog, retiredCatalog, type CatalogEntry } from "./catalog";
 import { normalizeArcgisLayerUrl } from "./arcgis";
 import { getParcelManifest, isTexasParcelSource, TEXAS_PARCEL_URL } from "./texasParcels";
 import type { ConnectionRecoveryHint, GisLayer } from "./types";
+import type { AccountService } from "./publicDataAccountModel";
 
 export type ConnectionKind = "basemap" | "public-data" | "project-layer";
 export type ConnectionStatus = "healthy" | "fallback" | "error";
@@ -88,6 +89,13 @@ const trustedBasemapCandidates: Record<string, Array<Omit<ReplacementCandidate, 
     },
   ],
   topo: [
+    {
+      url: "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}",
+      title: "USGS Topographic map",
+      notes: "Official USGS terrain, contours and hydrography tiles.",
+      source: "trusted alternative",
+      safeToAutoApply: true,
+    },
     {
       url: "https://tile.opentopomap.org/{z}/{x}/{y}.png",
       title: "Topographic map",
@@ -504,6 +512,12 @@ export async function findConnectionReplacement(
 export async function checkProjectConnections(
   layers: GisLayer[],
   connectionHints: Record<string, ConnectionRecoveryHint> = {},
+  account: {
+    removed?: Record<string, string>;
+    services?: Record<string, AccountService>;
+    overrides?: Record<string, string>;
+    restoredDefaults?: Record<string, boolean>;
+  } = {},
 ): Promise<ConnectionResult[]> {
   const targets: ConnectionTarget[] = basemaps.map((basemap) => {
     const override = connectionHints[`basemap:${basemap.id}`];
@@ -519,9 +533,15 @@ export async function checkProjectConnections(
     };
   });
 
-  for (const entry of catalog) {
+  for (const entry of [
+    ...catalog,
+    ...retiredCatalog.filter((entry) => account.restoredDefaults?.[`catalog:${entry.id}`]),
+  ]) {
+    if (account.removed?.[`catalog:${entry.id}`]) continue;
     const cloudOverride = connectionHints[`catalog:${entry.id}`];
-    const url = cloudOverride?.verified ? cloudOverride.url : resolveCatalogUrl(entry);
+    const url =
+      account.overrides?.[`catalog:${entry.id}`] ??
+      (cloudOverride?.verified ? cloudOverride.url : resolveCatalogUrl(entry));
     if (!url) continue;
     targets.push({
       id: `catalog:${entry.id}`,
@@ -533,7 +553,18 @@ export async function checkProjectConnections(
     });
   }
 
+  for (const service of Object.values(account.services ?? {})) {
+    if (!account.removed?.[`account:${service.id}`])
+      targets.push({
+        id: `account:${service.id}`,
+        name: service.name,
+        kind: "public-data",
+        url: service.url,
+        configuredUrl: service.url,
+      });
+  }
   for (const layer of layers) {
+    if (layer.source.kind === "remote" && layer.source.accountServiceId) continue;
     if (layer.source.kind !== "remote" || layer.source.catalogId) continue;
     targets.push({
       id: `layer:${layer.id}`,

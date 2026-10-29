@@ -1,0 +1,124 @@
+:root {
+  font:
+    14px system-ui,
+    sans-serif;
+  color: #1b2d21;
+  background: #f8f6ee;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
+header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  background: white;
+  border-bottom: 1px solid #d8dfd5;
+}
+header a {
+  color: #216f45;
+  font-weight: 700;
+}
+header strong {
+  font-size: 13px;
+}
+select {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 180px;
+  padding: 10px;
+  border: 1px solid #b5c4b8;
+  border-radius: 9px;
+  font-size: 16px;
+}
+main {
+  position: relative;
+  flex: 1;
+  min-height: 120px;
+  overflow: hidden;
+}
+canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  background: #eeeedd;
+}
+#tools {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid #b5c4b8;
+  background: white;
+  border-radius: 9px;
+  color: #185c38;
+  font: 600 13px system-ui;
+  padding: 7px;
+  box-shadow: 0 1px 4px #0002;
+}
+button[aria-pressed="true"] {
+  background: #216f45;
+  color: white;
+}
+output {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  background: #fffffff2;
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  pointer-events: none;
+}
+footer {
+  padding: 6px 10px;
+  background: white;
+  border-top: 1px solid #ddd;
+  max-height: 24dvh;
+  overflow: auto;
+}
+footer p {
+  font-size: 11px;
+  margin: 3px 0;
+}
+footer small {
+  font-size: 10px;
+  color: #59635a;
+}
+@media (max-height: 430px) {
+  header {
+    padding: 4px;
+  }
+  footer {
+    max-height: 18dvh;
+  }
+  #tools {
+    flex-direction: row;
+    left: 8px;
+    right: auto;
+  }
+  output {
+    padding: 5px;
+  }
+  button {
+    min-height: 36px;
+  }
+}
