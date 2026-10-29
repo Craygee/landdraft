@@ -123,6 +123,66 @@ for (const legacy of [false, true]) {
     0,
   );
   checks++;
+  // Sharing escalation paths from the 2026-10-29 security review stay closed.
+  await db.exec("reset role");
+  const ids = Object.fromEntries(
+    (await db.query("select name,id from public.projects")).rows.map((row) => [row.name, row.id]),
+  );
+  const shareId = "20000000-0000-0000-0000-000000000001";
+  await db.exec(`set role authenticated; set request.jwt.claim.sub='${a}';`);
+  await assert.rejects(
+    db.query(`update public.projects set owner_id='${b}' where id='${ids.A}'`),
+    /only be changed through LandDraft/,
+  );
+  checks++;
+  await assert.rejects(
+    db.query(`update public.projects set state_path='${b}/${ids.B}/states/x.json' where id='${ids.A}'`),
+    /only be changed through LandDraft/,
+  );
+  checks++;
+  await db.exec(`insert into public.project_shares(id,project_id,owner_id,name,state_path)
+ values('${shareId}','${ids.A}','${a}','Share','${a}/${ids.A}/shares/${shareId}/state.json');
+ insert into public.share_submissions(share_id,source_project_id,copy_project_id,submitted_by)
+ values('${shareId}','${ids.A}','${ids.A}','${a}');`);
+  await assert.rejects(
+    db.query(`update public.share_submissions set copy_project_id='${ids.B}'`),
+    /Only the status and note/,
+  );
+  checks++;
+  await db.query("update public.share_submissions set status='submitted', note='ok'");
+  checks++;
+  await assert.rejects(
+    db.query(`update public.project_shares set project_id='${ids.B}' where id='${shareId}'`),
+    /cannot be moved/,
+  );
+  checks++;
+  await assert.rejects(
+    db.query(`update public.project_shares set state_path='${b}/${ids.B}/states/x.json' where id='${shareId}'`),
+    /Share snapshot path is invalid/,
+  );
+  checks++;
+  await db.exec(`insert into public.share_members(share_id,invited_email,role,invited_by)
+ values('${shareId}','b@example.test','admin','${a}');`);
+  // An unconfirmed account with the invited email gets no role, even with a matching JWT claim.
+  await db.exec(
+    `set request.jwt.claim.sub='${b}'; set request.jwt.claims='{"email":"b@example.test"}';`,
+  );
+  assert.equal(
+    (await db.query(`select public.can_admin_project('${ids.A}') as ok`)).rows[0].ok,
+    false,
+  );
+  checks++;
+  assert.equal((await db.query("select public.claim_share_invitations() as n")).rows[0].n, 0);
+  checks++;
+  await db.exec(`reset role; update auth.users set email_confirmed_at=now() where id='${b}';
+ set role authenticated; set request.jwt.claim.sub='${b}';`);
+  assert.equal(
+    (await db.query(`select public.can_admin_project('${ids.A}') as ok`)).rows[0].ok,
+    true,
+  );
+  checks++;
+  await db.exec(`reset role; update auth.users set email_confirmed_at=null where id='${b}';
+ set request.jwt.claims=''; set role authenticated; set request.jwt.claim.sub='${a}';`);
   await db.exec("select public.upsert_weather_chaser_presence('Test',30,-100,null,null,null)");
   checks++;
   assert.equal(

@@ -943,7 +943,9 @@ export function ProjectRecordsPanel() {
         content = `<dl><dt>From</dt><dd>${escapeHtml(document.email.from ?? "")}</dd><dt>To</dt><dd>${escapeHtml(document.email.to ?? "")}</dd><dt>Subject</dt><dd>${escapeHtml(document.email.subject ?? document.name)}</dd></dl><pre>${escapeHtml(document.email.preview)}</pre>`;
       } else if (document.mimeType.startsWith("image/")) {
         const source = await fileDataUrl(await projectAssetBlob(document));
-        content = `<img src="${source}" alt="${escapeHtml(document.name)}" />`;
+        // The data URL's MIME type comes from the stored file (an email sender for
+        // inbound attachments), so it is escaped like any other attribute value.
+        content = `<img src="${escapeHtml(source)}" alt="${escapeHtml(document.name)}" />`;
       } else {
         content = `<p class="attachment">Attached file: ${escapeHtml(document.name)} (${formatBytes(document.size)}). The original is included in the downloadable packet.</p>`;
       }

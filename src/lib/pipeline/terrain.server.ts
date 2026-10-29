@@ -7,7 +7,40 @@ import {
 } from "./elevation.ts";
 
 const EPQS_URL = "https://epqs.nationalmap.gov/v1/json";
-const cache = new Map<string, { elevationM: number; resolutionM?: number; expiresAt: number }>();
+const CACHE_MAX_ENTRIES = 5_000;
+type CachedElevation = { elevationM: number; resolutionM?: number; expiresAt: number };
+const cache = new Map<string, CachedElevation>();
+
+// Each request fans out to up to USGS_TERRAIN_MAX_SAMPLES upstream calls, so callers
+// are limited per client address. Process-local like the weather limits; hosted
+// deployments still need an edge rate-limit rule.
+const REQUESTS_PER_MINUTE = 20;
+const RATE_WINDOW_MAX_KEYS = 2_000;
+const requestWindows = new Map<string, { count: number; endsAt: number }>();
+
+export function consumeElevationRequest(clientId: string, now = Date.now()): boolean {
+  const current = requestWindows.get(clientId);
+  if (current && current.endsAt > now) {
+    if (current.count >= REQUESTS_PER_MINUTE) return false;
+    current.count++;
+    return true;
+  }
+  requestWindows.delete(clientId);
+  if (requestWindows.size >= RATE_WINDOW_MAX_KEYS) {
+    for (const [id, item] of requestWindows) if (item.endsAt <= now) requestWindows.delete(id);
+    // Evict the oldest window rather than refusing every new caller.
+    while (requestWindows.size >= RATE_WINDOW_MAX_KEYS)
+      requestWindows.delete(requestWindows.keys().next().value!);
+  }
+  requestWindows.set(clientId, { count: 1, endsAt: now + 60_000 });
+  return true;
+}
+
+function cacheElevation(key: string, value: CachedElevation) {
+  cache.delete(key);
+  while (cache.size >= CACHE_MAX_ENTRIES) cache.delete(cache.keys().next().value!);
+  cache.set(key, value);
+}
 
 function validPoint(value: unknown): value is TerrainSampleRequestPoint {
   if (!value || typeof value !== "object") return false;
@@ -66,7 +99,7 @@ async function queryPoint(point: TerrainSampleRequestPoint): Promise<TerrainSamp
     const rawResolution = numericValue(payload["resolution"]);
     const resolutionM =
       rawResolution !== undefined && rawResolution > 0 ? rawResolution : undefined;
-    cache.set(key, {
+    cacheElevation(key, {
       elevationM,
       ...(resolutionM === undefined ? {} : { resolutionM }),
       expiresAt: Date.now() + 24 * 60 * 60 * 1_000,
@@ -95,6 +128,14 @@ export async function handlePipelineElevationRequest(request: Request): Promise<
   const url = new URL(request.url);
   if (url.pathname !== "/api/pipeline/elevation") return null;
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+  const origin = request.headers.get("origin");
+  if (origin && origin !== url.origin)
+    return Response.json({ error: "Cross-origin requests are not allowed" }, { status: 403 });
+  if (!consumeElevationRequest(request.headers.get("cf-connecting-ip") ?? "local"))
+    return Response.json(
+      { error: "Too many terrain profile requests. Wait a minute and try again." },
+      { status: 429, headers: { "retry-after": "60" } },
+    );
   try {
     const body = (await request.json()) as { points?: unknown };
     if (

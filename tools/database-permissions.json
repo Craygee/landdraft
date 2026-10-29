@@ -231,6 +231,12 @@
     "service_role": [],
     "rpcOnly": true
   },
+  "service_rate_limits": {
+    "authenticated": [],
+    "anon": [],
+    "service_role": [],
+    "rpcOnly": true
+  },
   "parcel_cache_policy": {
     "authenticated": [
       "SELECT"

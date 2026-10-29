@@ -139,6 +139,38 @@ const configuredProvider = (): AiProvider | null => {
     : null;
 };
 
+// Durable fixed-window limit shared by every Edge Function instance.
+const consumeRateLimit = async (bucket: string, limit: number, windowSeconds: number) => {
+  const url = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!url || !serviceRoleKey) throw new Error("The LandDraft rate limit service is unavailable");
+  const response = await fetch(`${url}/rest/v1/rpc/consume_service_rate_limit`, {
+    method: "POST",
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ p_bucket: bucket, p_limit: limit, p_window_seconds: windowSeconds }),
+  });
+  if (!response.ok) throw new Error(`The LandDraft rate limit check failed (${response.status})`);
+  return (await response.json()) === true;
+};
+
+// Direct place searches skip the AI quota but still call Nominatim and Overpass,
+// whose usage policies apply to LandDraft as a whole.
+const placeSearchAllowed = async (userId: string) =>
+  (await consumeRateLimit(
+    `place-search:user:${userId}`,
+    positiveInteger(Deno.env.get("PLACE_SEARCH_HOURLY_USER_REQUESTS"), 30, 500),
+    3_600,
+  )) &&
+  (await consumeRateLimit(
+    "place-search:global",
+    positiveInteger(Deno.env.get("PLACE_SEARCH_GLOBAL_REQUESTS_PER_MINUTE"), 30, 600),
+    60,
+  ));
+
 const consumeAiQuota = async (userId: string, reservedTokens: number): Promise<AiQuota> => {
   const url = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -588,8 +620,15 @@ Deno.serve(async (request) => {
     if (prompt.length > 4_000) return json(request, { error: "That request is too long" }, 413);
 
     const directPlace = directPlaceRequest(prompt);
-    if (directPlace)
+    if (directPlace) {
+      if (!(await placeSearchAllowed(user.id)))
+        return json(
+          request,
+          { error: "Too many place searches right now. Wait a few minutes and try again." },
+          429,
+        );
       return json(request, await searchPlaces(directPlace.query, directPlace.location));
+    }
 
     const provider = configuredProvider();
     if (!provider)

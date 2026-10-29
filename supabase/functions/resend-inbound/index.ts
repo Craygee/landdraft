@@ -4,6 +4,7 @@ import { Webhook } from "svix";
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 const MAX_MESSAGE_BYTES = 75 * 1024 * 1024;
 const RESEND_API = "https://api.resend.com";
+const STALE_PROCESSING_MS = 10 * 60 * 1000;
 
 interface ResendAttachment {
   id: string;
@@ -134,38 +135,56 @@ Deno.serve(async (request) => {
 
   const { data: existing } = await supabase
     .from("project_inbound_emails")
-    .select("id,status")
+    .select("id,status,owner_id,project_id")
     .eq("provider_email_id", providerEmailId)
     .maybeSingle();
-  if (existing) return json({ accepted: true, duplicate: true, id: existing.id });
 
-  const { data: inserted, error: insertError } = await supabase
-    .from("project_inbound_emails")
-    .insert({
-      owner_id: alias.owner_id,
-      alias_id: alias.id,
-      project_id: alias.project_id,
-      provider_email_id: providerEmailId,
-      message_id: event.data?.message_id ?? null,
-      from_address: event.data?.from ?? "",
-      to_addresses: addresses(event.data?.to),
-      cc_addresses: addresses(event.data?.cc),
-      bcc_addresses: addresses(event.data?.bcc),
-      reply_to_addresses: addresses(event.data?.reply_to),
-      subject: event.data?.subject ?? "(no subject)",
-      received_at: event.data?.created_at ?? new Date().toISOString(),
-      status: "processing",
-    })
-    .select("id")
-    .single();
-  if (insertError) {
-    if (insertError.code === "23505") return json({ accepted: true, duplicate: true });
-    throw insertError;
+  let emailRow: { id: string; owner_id: string; project_id: string | null };
+  if (existing) {
+    // A provider retry after a failed attempt reprocesses the same row. Claim it
+    // atomically so concurrent retries do not process it twice; a row left in
+    // "processing" by a crashed attempt is reclaimed after STALE_PROCESSING_MS.
+    const staleBefore = new Date(Date.now() - STALE_PROCESSING_MS).toISOString();
+    const { data: claimed, error: claimError } = await supabase
+      .from("project_inbound_emails")
+      .update({ status: "processing", error_message: null })
+      .eq("id", existing.id)
+      .or(`status.eq.error,and(status.eq.processing,updated_at.lt."${staleBefore}")`)
+      .select("id,owner_id,project_id")
+      .maybeSingle();
+    if (claimError) throw claimError;
+    if (!claimed) return json({ accepted: true, duplicate: true, id: existing.id });
+    emailRow = claimed;
+  } else {
+    const { data: inserted, error: insertError } = await supabase
+      .from("project_inbound_emails")
+      .insert({
+        owner_id: alias.owner_id,
+        alias_id: alias.id,
+        project_id: alias.project_id,
+        provider_email_id: providerEmailId,
+        message_id: event.data?.message_id ?? null,
+        from_address: event.data?.from ?? "",
+        to_addresses: addresses(event.data?.to),
+        cc_addresses: addresses(event.data?.cc),
+        bcc_addresses: addresses(event.data?.bcc),
+        reply_to_addresses: addresses(event.data?.reply_to),
+        subject: event.data?.subject ?? "(no subject)",
+        received_at: event.data?.created_at ?? new Date().toISOString(),
+        status: "processing",
+      })
+      .select("id,owner_id,project_id")
+      .single();
+    if (insertError) {
+      if (insertError.code === "23505") return json({ accepted: true, duplicate: true });
+      throw insertError;
+    }
+    emailRow = inserted;
   }
 
-  const emailId = inserted.id as string;
-  const storageProject = alias.project_id ?? "inbox";
-  const storagePrefix = `${alias.owner_id}/${storageProject}/documents/email/${emailId}`;
+  const emailId = emailRow.id;
+  const storageProject = emailRow.project_id ?? "inbox";
+  const storagePrefix = `${emailRow.owner_id}/${storageProject}/documents/email/${emailId}`;
   const errors: string[] = [];
   let totalBytes = 0;
 
@@ -261,17 +280,20 @@ Deno.serve(async (request) => {
         }
       }
 
-      const { error: attachmentError } = await supabase.from("project_inbound_attachments").insert({
-        email_id: emailId,
-        owner_id: alias.owner_id,
-        provider_attachment_id: attachment.id,
-        file_name: attachment.filename ?? "attachment",
-        content_type: attachment.content_type ?? "application/octet-stream",
-        byte_size: size,
-        storage_path: storagePath,
-        status,
-        error_message: errorMessage,
-      });
+      const { error: attachmentError } = await supabase.from("project_inbound_attachments").upsert(
+        {
+          email_id: emailId,
+          owner_id: emailRow.owner_id,
+          provider_attachment_id: attachment.id,
+          file_name: attachment.filename ?? "attachment",
+          content_type: attachment.content_type ?? "application/octet-stream",
+          byte_size: size,
+          storage_path: storagePath,
+          status,
+          error_message: errorMessage,
+        },
+        { onConflict: "email_id,provider_attachment_id" },
+      );
       if (attachmentError) errors.push(attachmentError.message);
     }
 

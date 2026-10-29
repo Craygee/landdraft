@@ -1,5 +1,14 @@
 import { downloadParcels, SOURCE_URL, validateBounds } from "./model.ts";
 
+// Constant-time comparison so response timing does not reveal the job secret.
+const secretMatches = (provided: string | null, expected: string) => {
+  const a = new TextEncoder().encode(provided ?? "");
+  const b = new TextEncoder().encode(expected);
+  let difference = a.length ^ b.length;
+  for (let i = 0; i < b.length; i++) difference |= (a[i] ?? 0) ^ b[i]!;
+  return difference === 0;
+};
+
 // Called only by the database scheduler. User configuration uses RLS-protected RPCs.
 Deno.serve(async (req) => {
   const secret = Deno.env.get("PARCEL_JOB_SECRET");
@@ -7,7 +16,7 @@ Deno.serve(async (req) => {
     req.method !== "POST" ||
     !secret ||
     secret.length < 32 ||
-    req.headers.get("x-parcel-job-secret") !== secret
+    !secretMatches(req.headers.get("x-parcel-job-secret"), secret)
   )
     return new Response("Unauthorized", { status: 401 });
   const url = Deno.env.get("SUPABASE_URL")!;

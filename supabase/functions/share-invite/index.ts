@@ -120,11 +120,44 @@ const escapeHtml = (value: string) =>
       character,
   );
 
+// The display name is user-editable, so the account email is always shown with it
+// to keep invitations from impersonating someone else.
 const inviterName = (user: AuthUser) => {
   const metadataName = user.user_metadata?.["full_name"] ?? user.user_metadata?.["name"];
-  return typeof metadataName === "string" && metadataName.trim()
-    ? metadataName.trim().slice(0, 120)
-    : user.email?.trim() || "A LandDraft user";
+  const name =
+    typeof metadataName === "string" && metadataName.trim()
+      ? metadataName.trim().slice(0, 80)
+      : "";
+  const email = user.email?.trim() ?? "";
+  if (name && email) return `${name} (${email})`;
+  return name || email || "A LandDraft user";
+};
+
+const positiveInteger = (value: string | undefined, fallback: number, maximum: number) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback;
+};
+
+// Durable daily cap on invitations per account, shared by every instance.
+const inviteAllowed = async (supabaseUrl: string, userId: string) => {
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!supabaseUrl || !serviceRoleKey)
+    throw new Error("The LandDraft rate limit service is unavailable");
+  const response = await fetch(`${supabaseUrl}/rest/v1/rpc/consume_service_rate_limit`, {
+    method: "POST",
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      p_bucket: `share-invite:user:${userId}`,
+      p_limit: positiveInteger(Deno.env.get("SHARE_INVITE_DAILY_LIMIT"), 50, 1_000),
+      p_window_seconds: 86_400,
+    }),
+  });
+  if (!response.ok) throw new Error(`The LandDraft rate limit check failed (${response.status})`);
+  return (await response.json()) === true;
 };
 
 const subjectText = (value: string) =>
@@ -154,6 +187,12 @@ Deno.serve(async (request) => {
       return json(request, { error: "Enter a valid email address" }, 400);
     if (role !== "viewer" && role !== "editor" && role !== "admin")
       return json(request, { error: "Choose a valid sharing role" }, 400);
+    if (!(await inviteAllowed(supabaseUrl, user.id)))
+      return json(
+        request,
+        { error: "You have sent the maximum number of invitations for today. Try again tomorrow." },
+        429,
+      );
 
     const requestHeaders = authenticatedRequest(request, publicKey);
     const shareResponse = await fetch(
@@ -205,7 +244,7 @@ Deno.serve(async (request) => {
       body: JSON.stringify({
         from,
         to: [email],
-        subject: `${subjectText(sender)} shared “${subjectText(share.name)}” with you in LandDraft`,
+        subject: `“${subjectText(share.name)}” was shared with you in LandDraft`,
         text: `LANDDRAFT\nPrivate map invitation\n\n${sender} shared “${share.name}” with you.\nAccess: ${roleNames[role]}\n\n${roleDescriptions[role]}\n\nOPEN SHARED MAP\n${inviteUrl.toString()}\n\nFor security, access is tied to ${email}. Sign in to LandDraft with that email address. The link does not grant access to anyone else.\n\nLandDraft — Map, measure and shape the land\nhttps://landdraft.net`,
         html: `<!doctype html>
 <html lang="en">

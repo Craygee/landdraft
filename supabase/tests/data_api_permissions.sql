@@ -132,7 +132,7 @@ select c.relname as table_name,c.relrowsecurity as rls_enabled,
  has_table_privilege('authenticated',c.oid,'SELECT') as signed_in_select,
  has_table_privilege('service_role',c.oid,'SELECT') as server_select,
  (select count(*) from pg_policy p where p.polrelid=c.oid) as policy_count,
- case when c.relname in ('profiles','projects','project_members','project_versions','project_shares','share_members','share_submissions','weather_provider_connections','project_email_aliases','project_inbound_emails','project_inbound_attachments','weather_product_entitlements','weather_provider_audit_events','ai_daily_usage','weather_license_reviews','weather_provider_catalog','weather_product_catalog','weather_chaser_presence','parcel_cache_policy','project_parcel_cache') then 'LANDDRAFT INVENTORY' else 'REVIEW UNCLASSIFIED' end as inventory
+ case when c.relname in ('profiles','projects','project_members','project_versions','project_shares','share_members','share_submissions','weather_provider_connections','project_email_aliases','project_inbound_emails','project_inbound_attachments','weather_product_entitlements','weather_provider_audit_events','ai_daily_usage','weather_license_reviews','weather_provider_catalog','weather_product_catalog','weather_chaser_presence','service_rate_limits','parcel_cache_policy','project_parcel_cache') then 'LANDDRAFT INVENTORY' else 'REVIEW UNCLASSIFIED' end as inventory
 from pg_class c join pg_namespace n on n.oid=c.relnamespace
 where n.nspname='public' and c.relkind in ('r','p') order by c.relname;
 
