@@ -1,5 +1,17 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
+
+const githubRepository =
+  process.env.PARCEL_GITHUB_REPOSITORY?.trim() ||
+  process.env.GITHUB_REPOSITORY?.trim() ||
+  "Craygee/landdraft";
+
+if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(githubRepository)) {
+  throw new Error(
+    "Set PARCEL_GITHUB_REPOSITORY to a GitHub owner/repository value before provisioning.",
+  );
+}
+
 const token = randomBytes(48).toString("base64url");
 const run = (exe, args) =>
   new Promise((resolve, reject) => {
@@ -28,7 +40,7 @@ await run("C:/Program Files/GitHub CLI/gh.exe", [
   "set",
   "PARCEL_PUBLISH_TOKEN",
   "--repo",
-  "Craygee/terrasketch-gis",
+  githubRepository,
 ]);
 console.log(
   "Dedicated parcel publishing credential installed in Worker and GitHub Actions; not written to disk.",
