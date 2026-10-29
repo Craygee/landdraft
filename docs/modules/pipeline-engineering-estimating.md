@@ -120,6 +120,19 @@ Current foundation verification (2026-09-11):
   normal LandDraft mapping continues.
 - Rollback: the September 10 checkpoint remains reachable as `landdraft-stable-2026-09-10`.
 
+## Phase 2 increment (local branch `claude/pipeline-engineering-2026-10-29`)
+
+Not merged. Details, test results and review notes:
+[Pipeline handoff 2026-10-29](../PIPELINE_ENGINEERING_HANDOFF_2026-10-29.md).
+
+- Solver 0.3.0-preliminary: components are step changes with paired profile points; no
+  interpolation across pumps or valves; `limit-exceeded` run status.
+- Components keep their location through route edits and are flagged for review when moved.
+- Survey/manual elevation control points with influence ranges; burial depth.
+- Construction ranges with evidence precedence, trench geometry, rock quantities, manual crossings,
+  land facility-siting tags.
+- Traceable takeoff v2 and an estimate ledger priced from immutable rate snapshots.
+
 ## Foundation limitations before the next increment
 
 - System pipe entries are dimensional screening templates and are not pressure-rating or
