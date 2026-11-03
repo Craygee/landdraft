@@ -38,7 +38,7 @@ begin
   end if;
 
   window_begin := pg_catalog.to_timestamp(
-    pg_catalog.floor(pg_catalog.extract(epoch from pg_catalog.now()) / p_window_seconds) * p_window_seconds
+    pg_catalog.floor(extract(epoch from pg_catalog.now()) / p_window_seconds) * p_window_seconds
   );
 
   delete from public.service_rate_limits

@@ -136,7 +136,9 @@ for (const legacy of [false, true]) {
   );
   checks++;
   await assert.rejects(
-    db.query(`update public.projects set state_path='${b}/${ids.B}/states/x.json' where id='${ids.A}'`),
+    db.query(
+      `update public.projects set state_path='${b}/${ids.B}/states/x.json' where id='${ids.A}'`,
+    ),
     /only be changed through LandDraft/,
   );
   checks++;
@@ -157,7 +159,9 @@ for (const legacy of [false, true]) {
   );
   checks++;
   await assert.rejects(
-    db.query(`update public.project_shares set state_path='${b}/${ids.B}/states/x.json' where id='${shareId}'`),
+    db.query(
+      `update public.project_shares set state_path='${b}/${ids.B}/states/x.json' where id='${shareId}'`,
+    ),
     /Share snapshot path is invalid/,
   );
   checks++;
@@ -204,6 +208,21 @@ for (const legacy of [false, true]) {
   checks++;
   await db.exec("reset role; set role service_role");
   await db.query("select * from public.projects");
+  checks++;
+  // Rejected requests are not counted, so the window stays at its limit.
+  const limits = [];
+  for (let i = 0; i < 3; i++)
+    limits.push(
+      (await db.query("select public.consume_service_rate_limit('test:user',2,60) as ok")).rows[0]
+        .ok,
+    );
+  assert.deepEqual(limits, [true, true, false]);
+  checks++;
+  await db.exec("reset role; set role authenticated");
+  await assert.rejects(
+    db.query("select public.consume_service_rate_limit('test:user',2,60)"),
+    /permission denied/,
+  );
   checks++;
   await db.exec("reset role");
   const audit = await db.exec(

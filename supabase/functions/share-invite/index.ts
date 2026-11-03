@@ -125,9 +125,7 @@ const escapeHtml = (value: string) =>
 const inviterName = (user: AuthUser) => {
   const metadataName = user.user_metadata?.["full_name"] ?? user.user_metadata?.["name"];
   const name =
-    typeof metadataName === "string" && metadataName.trim()
-      ? metadataName.trim().slice(0, 80)
-      : "";
+    typeof metadataName === "string" && metadataName.trim() ? metadataName.trim().slice(0, 80) : "";
   const email = user.email?.trim() ?? "";
   if (name && email) return `${name} (${email})`;
   return name || email || "A LandDraft user";
