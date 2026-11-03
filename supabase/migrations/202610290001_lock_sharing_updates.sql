@@ -251,7 +251,14 @@ begin
   if char_length(trim(p_name)) not between 1 and 160 then
     raise exception 'Project name must contain 1 to 160 characters';
   end if;
+  select * into existing
+  from public.projects
+  where id = p_project_id and public.can_admin_project(id)
+  for update;
+  if not found then return; end if;
+
   if p_state_path is null
+    or split_part(p_state_path, '/', 1) <> existing.owner_id::text
     or split_part(p_state_path, '/', 2) <> p_project_id::text
     or split_part(p_state_path, '/', 3) <> 'states'
     or split_part(p_state_path, '/', 4) = ''
@@ -259,12 +266,6 @@ begin
   then
     raise exception 'Project snapshot path is invalid' using errcode = '42501';
   end if;
-
-  select * into existing
-  from public.projects
-  where id = p_project_id and public.can_admin_project(id)
-  for update;
-  if not found then return; end if;
 
   if p_reason = 'autosave' and existing.state_path = p_state_path then
     return query select * from public.projects where id = p_project_id;
@@ -314,7 +315,8 @@ begin
   ) then
     raise exception 'A share cannot be moved to another project or owner' using errcode = '42501';
   end if;
-  if split_part(new.state_path, '/', 2) <> new.project_id::text
+  if split_part(new.state_path, '/', 1) <> new.owner_id::text
+    or split_part(new.state_path, '/', 2) <> new.project_id::text
     or split_part(new.state_path, '/', 3) <> 'shares'
     or split_part(new.state_path, '/', 4) <> new.id::text
     or split_part(new.state_path, '/', 5) = ''

@@ -142,10 +142,24 @@ for (const legacy of [false, true]) {
     /only be changed through LandDraft/,
   );
   checks++;
+  await assert.rejects(
+    db.query(
+      `select public.save_project_snapshot('${ids.A}','A','${b}/${ids.A}/states/x.json','manual')`,
+    ),
+    /Project snapshot path is invalid/,
+  );
+  checks++;
   await db.exec(`insert into public.project_shares(id,project_id,owner_id,name,state_path)
  values('${shareId}','${ids.A}','${a}','Share','${a}/${ids.A}/shares/${shareId}/state.json');
  insert into public.share_submissions(share_id,source_project_id,copy_project_id,submitted_by)
  values('${shareId}','${ids.A}','${ids.A}','${a}');`);
+  await assert.rejects(
+    db.query(`insert into public.project_shares(id,project_id,owner_id,name,state_path)
+ values('20000000-0000-0000-0000-000000000002','${ids.A}','${a}','Bad path',
+ '${b}/${ids.A}/shares/20000000-0000-0000-0000-000000000002/state.json')`),
+    /Share snapshot path is invalid/,
+  );
+  checks++;
   await assert.rejects(
     db.query(`update public.share_submissions set copy_project_id='${ids.B}'`),
     /Only the status and note/,
