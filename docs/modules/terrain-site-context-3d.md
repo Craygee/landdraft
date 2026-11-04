@@ -1,8 +1,11 @@
 # Terrain & Site Context 3D
 
-Status: Ready for production release 0.9.215  
-Owner branch: `codex/topography-3d-module-2026-11-04`  
-Core mapping impact: Adds raster public-layer support without restricting or replacing core mapping  
+Status: Ready for production release 0.9.215
+
+Owner branch: `codex/topography-3d-module-2026-11-04`
+
+Core mapping impact: Adds raster public-layer support without restricting or replacing core mapping
+
 Pricing: Undecided
 
 ## Capabilities
