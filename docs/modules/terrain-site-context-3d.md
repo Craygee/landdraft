@@ -1,6 +1,6 @@
 # Terrain & Site Context 3D
 
-Status: Production release 0.9.216
+Status: Production release 0.9.217
 
 Owner branch: `codex/topography-3d-module-2026-11-04`
 
@@ -19,8 +19,11 @@ Pricing: Undecided
 - Provides Quick analysis up to 100 km² and Detailed analysis up to 4 km².
 - Renders an interactive orbitable terrain mesh with USGS topographic or attributed imagery
   coloring, mapped wetlands and visible project/public features.
-- Keeps OpenStreetMap beneath the selected surface and resizes the MapLibre canvas with its
-  workspace so provider or responsive-layout problems do not leave an unexplained blank map.
+- Initializes OpenStreetMap and the selected reference surface independently, then progressively
+  attaches the optional DEM, 3D terrain and hillshade. A DEM/WebGL terrain failure therefore
+  degrades to a usable reference map instead of a blank canvas.
+- Resizes the MapLibre canvas with its workspace and enforces a minimum map height for responsive
+  layouts.
 - Reports bounded numeric elevation summaries from USGS 3DEP. During a numeric-service outage,
   Quick mode may use a clearly labeled approximate display-mesh sample; Detailed mode never
   substitutes that lower-assurance result.
@@ -91,7 +94,10 @@ Release verification on 2026-11-04:
 - TypeScript: passed.
 - ESLint: zero errors; nine existing Fast Refresh warnings.
 - Production client, SSR and Cloudflare build: passed.
-- GIS: 194 passed; Weather: 129 passed; Pipeline: 38 passed; Water: 20 passed.
+- GIS: 196 passed; Weather: 129 passed; Pipeline: 38 passed; Water: 20 passed; Study Report: 7
+  passed.
+- A disposable headless Chrome/WebGL smoke page rendered the USGS topographic surface and the 3D
+  terrain mesh at zoom 11 before release; the fixture and browser profile were removed afterward.
 - Live read-only probes: USGS Topographic tile, USGS EPQS point, USGS 3DEP metadata/grid,
   Terrarium tile and NWI service responded successfully.
 

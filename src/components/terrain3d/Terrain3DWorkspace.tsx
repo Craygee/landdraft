@@ -6,7 +6,6 @@ import {
   setWorkerUrl,
   type GeoJSONSource,
   type LngLatLike,
-  type StyleSpecification,
 } from "maplibre-gl";
 import mapLibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -40,75 +39,59 @@ import {
   terrainAnalysisInput,
   terrainBoundary,
   terrainBoundsAreaKm2,
+  terrainReferenceStyle,
   validateTerrainSelection,
   type TerrainAnalysisMode,
   type TerrainBounds,
   type TerrainGridSummary,
+  type TerrainSurface,
 } from "@/lib/gis/terrain3d";
 
 setWorkerUrl(mapLibreWorkerUrl);
 
-type Surface = "topographic" | "imagery";
 type WetlandStatus = "idle" | "loading" | "loaded" | "empty" | "error";
 type SummarySource = "usgs-3dep" | "display-mesh-estimate";
 type MapStatus = "loading" | "ready" | "degraded" | "error";
 
 const emptyCollection = (): FeatureCollection => ({ type: "FeatureCollection", features: [] });
 
-function terrainStyle(surface: Surface): StyleSpecification {
-  const imagery = surface === "imagery";
-  return {
-    version: 8,
-    sources: {
-      base: {
-        type: "raster",
-        tiles: [TERRAIN_3D_SOURCES.baseMap],
-        tileSize: 256,
-        maxzoom: 19,
-        attribution: "© OpenStreetMap contributors",
-      },
-      surface: {
-        type: "raster",
-        tiles: [imagery ? TERRAIN_3D_SOURCES.imagery : TERRAIN_3D_SOURCES.topographic],
-        tileSize: 256,
-        maxzoom: imagery ? 19 : 16,
-        attribution: imagery
-          ? "Imagery © Esri, Maxar, Earthstar Geographics and contributors"
-          : "USGS The National Map and contributors",
-      },
-      terrain: {
-        type: "raster-dem",
-        tiles: [TERRAIN_3D_SOURCES.terrainTiles],
-        tileSize: 256,
-        maxzoom: 15,
-        encoding: "terrarium",
-        attribution: "Terrain: Mapzen/Terrain Tiles on AWS Open Data; source-specific credits",
-      },
-    },
-    layers: [
-      { id: "background", type: "background", paint: { "background-color": "#dfe8d8" } },
-      { id: "base", type: "raster", source: "base" },
-      { id: "surface", type: "raster", source: "surface" },
-      {
-        id: "terrain-hillshade",
-        type: "hillshade",
-        source: "terrain",
-        paint: {
-          "hillshade-exaggeration": imagery ? 0.25 : 0.4,
-          "hillshade-shadow-color": "#263226",
-          "hillshade-highlight-color": "#ffffff",
-          "hillshade-accent-color": "#56634c",
-        },
-      },
-    ],
-    terrain: { source: "terrain", exaggeration: 1.35 },
-  };
-}
-
 function studyFeatureCollection(bounds: TerrainBounds | null): FeatureCollection {
   return bounds
     ? { type: "FeatureCollection", features: [terrainBoundary(bounds)] }
     : emptyCollection();
+}
+
+function ensureTerrainLayers(map: MlMap, exaggeration: number, surface: TerrainSurface) {
+  const terrainSource = {
+    type: "raster-dem" as const,
+    tiles: [TERRAIN_3D_SOURCES.terrainTiles],
+    tileSize: 256,
+    maxzoom: 15,
+    encoding: "terrarium" as const,
+    attribution: "Terrain: Mapzen/Terrain Tiles on AWS Open Data; source-specific credits",
+  };
+  if (!map.getSource("terrain")) map.addSource("terrain", terrainSource);
+  // MapLibre recommends separate source instances for 3D terrain and
+  // hillshade. They share the same immutable tile URL and browser cache.
+  if (!map.getSource("terrain-hillshade-dem")) {
+    map.addSource("terrain-hillshade-dem", {
+      ...terrainSource,
+    });
+  }
+  if (!map.getLayer("terrain-hillshade")) {
+    map.addLayer({
+      id: "terrain-hillshade",
+      type: "hillshade",
+      source: "terrain-hillshade-dem",
+      paint: {
+        "hillshade-exaggeration": surface === "imagery" ? 0.25 : 0.4,
+        "hillshade-shadow-color": "#263226",
+        "hillshade-highlight-color": "#ffffff",
+        "hillshade-accent-color": "#56634c",
+      },
+    });
+  }
+  map.setTerrain({ source: "terrain", exaggeration });
 }
 
 function ensureContextLayers(
@@ -220,6 +203,7 @@ export function Terrain3DWorkspace() {
   const mapRef = useRef<MlMap | null>(null);
   const analysisAbortRef = useRef<AbortController | null>(null);
   const exaggerationRef = useRef(1.35);
+  const surfaceRef = useRef<TerrainSurface>("topographic");
   const selectingRef = useRef(false);
   const firstCornerRef = useRef<[number, number] | null>(null);
   const boundsRef = useRef<TerrainBounds | null>(null);
@@ -227,7 +211,7 @@ export function Terrain3DWorkspace() {
   const { setMap } = useMapRef();
   const wb = useWorkbench();
 
-  const [surface, setSurface] = useState<Surface>("topographic");
+  const [surface, setSurface] = useState<TerrainSurface>("topographic");
   const [mode, setMode] = useState<TerrainAnalysisMode>("quick");
   const [bounds, setBounds] = useState<TerrainBounds | null>(null);
   const [selecting, setSelecting] = useState(false);
@@ -247,6 +231,7 @@ export function Terrain3DWorkspace() {
   boundsRef.current = bounds;
   selectingRef.current = selecting;
   exaggerationRef.current = exaggeration;
+  surfaceRef.current = surface;
 
   const projectFeatures = useMemo<FeatureCollection>(() => {
     if (!projectContextEnabled) return emptyCollection();
@@ -283,7 +268,12 @@ export function Terrain3DWorkspace() {
       contextRef.current.wetlands,
       contextRef.current.project,
     );
-    map.setTerrain({ source: "terrain", exaggeration: exaggerationRef.current });
+    try {
+      ensureTerrainLayers(map, exaggerationRef.current, surfaceRef.current);
+    } catch (error) {
+      console.warn("Terrain 3D enhancement could not be enabled", error);
+      setMapStatus("degraded");
+    }
   }, []);
 
   useEffect(() => {
@@ -292,7 +282,7 @@ export function Terrain3DWorkspace() {
     try {
       map = new MlMap({
         container: containerRef.current,
-        style: terrainStyle(surface),
+        style: terrainReferenceStyle(surface),
         center: (wb.mapView.center ?? [-98.5, 31.3]) as LngLatLike,
         zoom: TERRAIN_3D_DEFAULT_ZOOM,
         bearing: -24,
@@ -383,8 +373,19 @@ export function Terrain3DWorkspace() {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
-    map.setStyle(terrainStyle(surface), { diff: false });
+    if (!map?.isStyleLoaded()) return;
+    map.setPaintProperty(
+      "surface-topographic",
+      "raster-opacity",
+      surface === "topographic" ? 1 : 0,
+    );
+    map.setPaintProperty("surface-imagery", "raster-opacity", surface === "imagery" ? 1 : 0);
+    if (map.getLayer("terrain-hillshade"))
+      map.setPaintProperty(
+        "terrain-hillshade",
+        "hillshade-exaggeration",
+        surface === "imagery" ? 0.25 : 0.4,
+      );
   }, [surface]);
 
   useEffect(() => {
@@ -400,7 +401,13 @@ export function Terrain3DWorkspace() {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (map?.isStyleLoaded()) map.setTerrain({ source: "terrain", exaggeration });
+    if (!map?.isStyleLoaded() || !map.getSource("terrain")) return;
+    try {
+      map.setTerrain({ source: "terrain", exaggeration });
+    } catch (error) {
+      console.warn("Terrain exaggeration could not be updated", error);
+      setMapStatus("degraded");
+    }
   }, [exaggeration]);
 
   const useCurrentView = () => {
@@ -567,7 +574,7 @@ export function Terrain3DWorkspace() {
       <main className="relative min-h-0 flex-1 overflow-hidden">
         <div
           ref={containerRef}
-          className="absolute inset-0"
+          className="absolute inset-0 min-h-[240px] bg-[#dfe8d8]"
           aria-label="Interactive 3D terrain map"
         />
 

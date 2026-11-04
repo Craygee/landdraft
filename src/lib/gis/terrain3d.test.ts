@@ -8,11 +8,37 @@ import {
   terrainAnalysisInput,
   terrainBoundsAreaKm2,
   terrainBoundary,
+  terrainReferenceStyle,
   validateTerrainSelection,
 } from "./terrain3d.ts";
 
 test("opens the terrain workspace at the requested zoom level", () => {
   assert.equal(TERRAIN_3D_DEFAULT_ZOOM, 11);
+});
+
+test("loads a reference map without making the optional terrain mesh a startup dependency", () => {
+  const style = terrainReferenceStyle("topographic");
+  const inspectable = style as unknown as {
+    sources: Record<string, unknown>;
+    terrain?: unknown;
+    layers: Array<{ id: string; type: string; paint?: Record<string, unknown> }>;
+  };
+  assert.ok(inspectable.sources["base"]);
+  assert.ok(inspectable.sources["topographic"]);
+  assert.ok(inspectable.sources["imagery"]);
+  assert.equal(inspectable.sources["terrain"], undefined);
+  assert.equal(inspectable.terrain, undefined);
+  assert.equal(inspectable.layers.find((layer) => layer.id === "base")?.type, "raster");
+  assert.equal(
+    inspectable.layers.find((layer) => layer.id === "surface-topographic")?.paint?.[
+      "raster-opacity"
+    ],
+    1,
+  );
+  assert.equal(
+    inspectable.layers.find((layer) => layer.id === "surface-imagery")?.paint?.["raster-opacity"],
+    0,
+  );
 });
 
 test("normalizes a two-corner selection and closes its polygon", () => {

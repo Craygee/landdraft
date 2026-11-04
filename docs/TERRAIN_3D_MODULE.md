@@ -1,6 +1,6 @@
 # LandDraft Terrain & Site Context 3D
 
-Status: optional foundation module, version 0.1.1 (2026-11-04).
+Status: optional foundation module, version 0.1.2 (2026-11-04).
 
 ## Purpose
 
@@ -67,6 +67,11 @@ The module uses:
 - the existing `/api/analysis/buildable-terrain` proxy for validated USGS grids;
 - the existing ArcGIS paged-query client for viewport-bounded wetland features; and
 - existing project layer data as read-only context.
+
+The reference map now initializes independently from the optional elevation mesh. OpenStreetMap
+and the selected topographic/imagery surface load first; the Terrarium DEM, 3D terrain and
+hillshade are attached as recoverable enhancements. A WebGL-terrain or DEM-provider failure can
+therefore degrade the workspace to a usable reference map instead of leaving a blank canvas.
 
 The module is linked from LandDraft Tools. Access currently follows `mapping.core`; a future
 `terrain.3d` entitlement can be added without changing the analysis contract. Pricing is undecided.

@@ -1,8 +1,10 @@
 import type { Feature, Polygon } from "geojson";
+import type { StyleSpecification } from "maplibre-gl";
 import type { BuildableInput } from "./buildableAreaModel.ts";
 import type { TerrainGrid } from "./buildableTerrainModel.ts";
 
 export type TerrainAnalysisMode = "quick" | "detailed";
+export type TerrainSurface = "topographic" | "imagery";
 export type TerrainBounds = [west: number, south: number, east: number, north: number];
 
 export const TERRAIN_3D_VERSION = "0.1.0";
@@ -23,6 +25,56 @@ export const TERRAIN_3D_SOURCES = {
   wetlands:
     "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0",
 } as const;
+
+/**
+ * Keep the ordinary reference map independent from the optional 3D mesh. A
+ * raster-dem source is attached after this style has loaded so a DEM, WebGL
+ * terrain or hillshade failure can never prevent the base map from drawing.
+ */
+export function terrainReferenceStyle(surface: TerrainSurface): StyleSpecification {
+  return {
+    version: 8,
+    sources: {
+      base: {
+        type: "raster",
+        tiles: [TERRAIN_3D_SOURCES.baseMap],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: "© OpenStreetMap contributors",
+      },
+      topographic: {
+        type: "raster",
+        tiles: [TERRAIN_3D_SOURCES.topographic],
+        tileSize: 256,
+        maxzoom: 16,
+        attribution: "USGS The National Map and contributors",
+      },
+      imagery: {
+        type: "raster",
+        tiles: [TERRAIN_3D_SOURCES.imagery],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: "Imagery © Esri, Maxar, Earthstar Geographics and contributors",
+      },
+    },
+    layers: [
+      { id: "background", type: "background", paint: { "background-color": "#dfe8d8" } },
+      { id: "base", type: "raster", source: "base" },
+      {
+        id: "surface-topographic",
+        type: "raster",
+        source: "topographic",
+        paint: { "raster-opacity": surface === "topographic" ? 1 : 0 },
+      },
+      {
+        id: "surface-imagery",
+        type: "raster",
+        source: "imagery",
+        paint: { "raster-opacity": surface === "imagery" ? 1 : 0 },
+      },
+    ],
+  };
+}
 
 export function normalizeTerrainBounds(bounds: TerrainBounds): TerrainBounds {
   const west = Math.min(bounds[0], bounds[2]);
