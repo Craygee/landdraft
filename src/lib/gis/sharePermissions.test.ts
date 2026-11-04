@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   applySharePermissions,
+  layerNoteShareKey,
+  legacyLayerNoteShareKey,
+  PROJECT_SUMMARY_SHARE_KEY,
+  projectNoteShareKey,
   refreshSharedNotes,
   sharedCapabilities,
   sharePermissions,
@@ -47,6 +51,10 @@ const note = {
   updatedAt: 1,
   includeInPacket: true,
 };
+const permissions = (patch: Partial<typeof NEW_SHARE_PERMISSIONS> = {}) => ({
+  ...NEW_SHARE_PERMISSIONS,
+  ...patch,
+});
 const state = (): ProjectState => ({
   version: 1,
   name: "Source",
@@ -134,43 +142,54 @@ const state = (): ProjectState => ({
 test("new shares allow exports and require an explicit note opt-in", () => {
   assert.deepEqual(NEW_SHARE_PERMISSIONS, {
     allowExport: true,
+    allowPrint: true,
     allowNotes: false,
     allowLayerOpacity: true,
+    sharedNoteIds: [],
   });
   assert.deepEqual(sharePermissions(undefined), {
     allowExport: true,
+    allowPrint: true,
     allowNotes: true,
     allowLayerOpacity: true,
+    sharedNoteIds: null,
   });
   assert.deepEqual(sharePermissions({ allowExport: false, allowNotes: false }), {
     allowExport: false,
+    allowPrint: true,
     allowNotes: false,
     allowLayerOpacity: true,
+    sharedNoteIds: null,
   });
 });
-test("viewer capabilities remove editing, AI, map search and backup independently of layer export", () => {
+test("viewer print and export capabilities are independently controlled", () => {
   for (const allowExport of [true, false])
-    for (const allowNotes of [true, false]) {
-      const caps = sharedCapabilities("viewer", {
-        allowExport,
-        allowNotes,
-        allowLayerOpacity: true,
-      });
-      assert.equal(caps.canEditProject, false);
-      assert.equal(caps.canUseAi, false);
-      assert.equal(caps.canSearchMap, false);
-      assert.equal(caps.canBackupProject, false);
-      assert.equal(caps.canExportLayers, allowExport);
-      assert.equal(caps.canViewNotes, allowNotes);
-    }
+    for (const allowPrint of [true, false])
+      for (const allowNotes of [true, false]) {
+        const caps = sharedCapabilities(
+          "viewer",
+          permissions({ allowExport, allowPrint, allowNotes }),
+        );
+        assert.equal(caps.canEditProject, false);
+        assert.equal(caps.canUseAi, false);
+        assert.equal(caps.canSearchMap, false);
+        assert.equal(caps.canBackupProject, false);
+        assert.equal(caps.canExportLayers, allowExport);
+        assert.equal(caps.canPrintMaps, allowPrint);
+        assert.equal(caps.canViewNotes, allowNotes);
+      }
 });
 test("owners and admins retain full tools; editors must use their editable working copy", () => {
   for (const role of ["owner", "admin"]) {
-    const caps = sharedCapabilities(role, {
-      allowExport: false,
-      allowNotes: false,
-      allowLayerOpacity: false,
-    });
+    const caps = sharedCapabilities(
+      role,
+      permissions({
+        allowExport: false,
+        allowPrint: false,
+        allowNotes: false,
+        allowLayerOpacity: false,
+      }),
+    );
     assert.ok(Object.values(caps).every(Boolean));
   }
   assert.equal(sharedCapabilities("editor").canEditProject, false);
@@ -179,11 +198,7 @@ test("owners and admins retain full tools; editors must use their editable worki
 test("hidden notes are absent from snapshot records, legacy fields and note markers without altering source geometry", () => {
   const source = state();
   const before = JSON.stringify(source);
-  const output = applySharePermissions(source, {
-    allowExport: true,
-    allowNotes: false,
-    allowLayerOpacity: true,
-  });
+  const output = applySharePermissions(source, permissions());
   assert.equal(output.records!.notes.length, 0);
   assert.equal(output.records!.layerNotes.length, 0);
   assert.equal(output.records!.events.length, 0);
@@ -195,11 +210,10 @@ test("hidden notes are absent from snapshot records, legacy fields and note mark
   assert.ok(!JSON.stringify(output).includes("Secret"));
 });
 test("allowed project notes and shared-layer notes are read from scoped snapshots only", () => {
-  const output = applySharePermissions(state(), {
-    allowExport: false,
-    allowNotes: true,
-    allowLayerOpacity: true,
-  });
+  const output = applySharePermissions(
+    state(),
+    permissions({ allowExport: false, allowNotes: true, sharedNoteIds: null }),
+  );
   assert.equal(output.records!.notes[0]!.body, "Project body");
   assert.deepEqual(
     output.records!.layerNotes.map((n) => n.layerId),
@@ -208,6 +222,44 @@ test("allowed project notes and shared-layer notes are read from scoped snapshot
   assert.equal(output.layers[1]!.data.features.length, 1);
   assert.equal(output.layers[1]!.data.features[0]!.properties!["NOTE"], "Allowed");
   assert.equal(output.records!.events.length, 0);
+});
+test("explicit note selection uploads only chosen notes, matching markers, summary and legacy notes", () => {
+  const source = state();
+  source.records!.notes.push({ ...note, id: "private-project", title: "Do not share" });
+  source.layers[1]!.data.features[1]!.properties!["NOTE_ID"] = "a";
+  const output = applySharePermissions(
+    source,
+    permissions({
+      allowNotes: true,
+      sharedNoteIds: [projectNoteShareKey("project-note"), layerNoteShareKey("a")],
+    }),
+  );
+  assert.deepEqual(
+    output.records!.notes.map((item) => item.id),
+    ["project-note"],
+  );
+  assert.deepEqual(
+    output.records!.layerNotes.map((item) => item.id),
+    ["a"],
+  );
+  assert.equal(output.records!.summary, "");
+  assert.equal(output.layers[0]!.note, undefined);
+  assert.equal(output.layers[1]!.data.features.length, 1);
+  assert.equal(output.layers[1]!.data.features[0]!.properties!["NOTE_ID"], "a");
+  assert.ok(!JSON.stringify(output).includes("Do not share"));
+
+  const contextOnly = applySharePermissions(
+    source,
+    permissions({
+      allowNotes: true,
+      sharedNoteIds: [PROJECT_SUMMARY_SHARE_KEY, legacyLayerNoteShareKey("included")],
+    }),
+  );
+  assert.equal(contextOnly.records!.notes.length, 0);
+  assert.equal(contextOnly.records!.layerNotes.length, 0);
+  assert.equal(contextOnly.records!.summary, "Private summary");
+  assert.equal(contextOnly.layers[0]!.note, "Legacy private note");
+  assert.equal(contextOnly.layers[1]!.data.features.length, 0);
 });
 test("reapplying sharing restrictions is safe for old or incomplete record collections", () => {
   const source = state();
@@ -233,7 +285,7 @@ test("changing sharing options retains cached remote geometry and never applies 
       { layerId: "included", featureIndexes: [9] },
       { layerId: "map-notes", featureIndexes: [1] },
     ],
-    { allowExport: false, allowNotes: true, allowLayerOpacity: true },
+    permissions({ allowExport: false, allowNotes: true, sharedNoteIds: null }),
   );
   assert.deepEqual(output.layers[0]!.data, snapshot.layers[0]!.data);
   assert.equal(output.records!.notes[0]!.body, "Updated source note");

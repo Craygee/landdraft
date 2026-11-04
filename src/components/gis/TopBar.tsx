@@ -343,7 +343,7 @@ export function TopBar({
         </div>
       )}
 
-      {showExport && wb.canExportLayers && (
+      {showExport && (wb.canPrintMaps || wb.canExportLayers || wb.canBackupProject) && (
         <div className="float-surface absolute right-2 top-14 w-80 rounded-2xl">
           <ExportPanel onDone={() => setShowExport(false)} />
         </div>
@@ -449,15 +449,17 @@ export function TopBar({
               }}
             />
           )}
-          <MenuAction
-            icon={<Printer className="size-4" />}
-            label="Print map"
-            help="Open the printable map composer"
-            onClick={() => {
-              closeCompactMenus();
-              setPrintOpen(true);
-            }}
-          />
+          {wb.canPrintMaps && (
+            <MenuAction
+              icon={<Printer className="size-4" />}
+              label="Print map"
+              help="Open the printable map composer"
+              onClick={() => {
+                closeCompactMenus();
+                setPrintOpen(true);
+              }}
+            />
+          )}
           <MenuAction
             icon={<Share2 className="size-4" />}
             label="Share map"

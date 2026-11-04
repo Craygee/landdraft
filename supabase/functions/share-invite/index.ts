@@ -19,6 +19,14 @@ interface AuthUser {
 interface ShareRow {
   id: string;
   name: string;
+  map_view?: {
+    sharePermissions?: {
+      allowExport?: boolean;
+      allowPrint?: boolean;
+      allowNotes?: boolean;
+      allowLayerOpacity?: boolean;
+    };
+  };
 }
 
 interface MemberRow {
@@ -37,10 +45,20 @@ const roleNames: Record<ShareRole, string> = {
   admin: "Administrator",
 };
 
-const roleDescriptions: Record<ShareRole, string> = {
-  viewer: "You can explore the shared map, switch layers, inspect attributes, and print it.",
-  editor: "You can create a separate editable copy for the map administrator to review.",
-  admin: "You can directly edit the shared project and manage its sharing settings.",
+const roleDescription = (role: ShareRole, share: ShareRow) => {
+  if (role === "admin")
+    return "You can directly edit the shared project and manage its sharing settings.";
+  const permissions = share.map_view?.sharePermissions;
+  const tools = [
+    permissions?.allowNotes !== false ? "read selected notes" : "",
+    permissions?.allowPrint !== false ? "print or create a PDF" : "",
+    permissions?.allowExport !== false ? "export shared GIS layers" : "",
+    permissions?.allowLayerOpacity !== false ? "adjust layer opacity" : "",
+  ].filter(Boolean);
+  const access = tools.length ? ` You can also ${tools.join(", ")}.` : "";
+  return role === "editor"
+    ? `You can explore the shared map and create a separate editable copy for the map administrator to review.${access}`
+    : `You can explore the shared map, switch layers, and inspect attributes.${access}`;
 };
 
 const corsOrigin = (request: Request) => {
@@ -194,7 +212,7 @@ Deno.serve(async (request) => {
 
     const requestHeaders = authenticatedRequest(request, publicKey);
     const shareResponse = await fetch(
-      `${supabaseUrl}/rest/v1/project_shares?select=id,name&id=eq.${encodeURIComponent(shareId)}&active=eq.true&limit=1`,
+      `${supabaseUrl}/rest/v1/project_shares?select=id,name,map_view&id=eq.${encodeURIComponent(shareId)}&active=eq.true&limit=1`,
       { headers: requestHeaders },
     );
     if (!shareResponse.ok)
@@ -226,7 +244,7 @@ Deno.serve(async (request) => {
     const escapedSender = escapeHtml(sender);
     const escapedMap = escapeHtml(share.name);
     const escapedRole = escapeHtml(roleNames[role]);
-    const escapedDescription = escapeHtml(roleDescriptions[role]);
+    const escapedDescription = escapeHtml(roleDescription(role, share));
     const escapedUrl = escapeHtml(inviteUrl.toString());
     const logoUrl = new URL("/landdraft-icon-192.png", inviteUrl.origin).toString();
     const escapedLogoUrl = escapeHtml(logoUrl);

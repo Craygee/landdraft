@@ -32,26 +32,28 @@ export function ExportPanel({ onDone }: { onDone?: () => void }) {
 
   return (
     <div className="space-y-3 p-3 text-xs">
-      <section>
-        <h3 className="mb-1.5 flex items-center gap-1.5 font-semibold">
-          <FileText className="size-3.5 text-primary" /> Map layout
-        </h3>
-        <button
-          onClick={() => {
-            onDone?.();
-            setPrintOpen(true);
-          }}
-          className="flex w-full items-center gap-2 rounded-xl bg-primary px-3 py-2 text-left font-medium text-primary-foreground"
-        >
-          <Printer className="size-4" />
-          <span>
-            Open print composer
-            <span className="block text-[10px] font-normal opacity-80">
-              Titles, legend, page size, annotations and Save as PDF
+      {wb.canPrintMaps && (
+        <section>
+          <h3 className="mb-1.5 flex items-center gap-1.5 font-semibold">
+            <FileText className="size-3.5 text-primary" /> Map layout
+          </h3>
+          <button
+            onClick={() => {
+              onDone?.();
+              setPrintOpen(true);
+            }}
+            className="flex w-full items-center gap-2 rounded-xl bg-primary px-3 py-2 text-left font-medium text-primary-foreground"
+          >
+            <Printer className="size-4" />
+            <span>
+              Open print composer
+              <span className="block text-[10px] font-normal opacity-80">
+                Titles, legend, page size, annotations and Save as PDF
+              </span>
             </span>
-          </span>
-        </button>
-      </section>
+          </button>
+        </section>
+      )}
 
       {wb.canExportLayers && (
         <section className="border-t border-border pt-3">

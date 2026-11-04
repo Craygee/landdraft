@@ -1,4 +1,11 @@
-import { NEW_SHARE_PERMISSIONS, type SharePermissions } from "@/lib/gis/sharePermissions";
+import {
+  legacyLayerNoteShareKey,
+  layerNoteShareKey,
+  NEW_SHARE_PERMISSIONS,
+  PROJECT_SUMMARY_SHARE_KEY,
+  projectNoteShareKey,
+  type SharePermissions,
+} from "@/lib/gis/sharePermissions";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { bbox as turfBbox } from "@turf/turf";
 import {
@@ -33,7 +40,7 @@ import {
   type ShareSubmission,
 } from "@/lib/gis/sharing";
 import { useWorkbench } from "@/lib/gis/store";
-import type { MapViewState } from "@/lib/gis/types";
+import type { GisLayer, MapViewState, ProjectRecords } from "@/lib/gis/types";
 import { cn } from "@/lib/utils";
 
 interface SharingData {
@@ -41,6 +48,44 @@ interface SharingData {
   members: ShareMember[];
   submissions: ShareSubmission[];
 }
+
+interface ShareNoteOption {
+  id: string;
+  title: string;
+  context: string;
+}
+
+const noteOptionsFor = (
+  records: ProjectRecords,
+  layers: GisLayer[],
+  includedLayerIds: ReadonlySet<string>,
+): ShareNoteOption[] => {
+  const layerNames = new Map(layers.map((layer) => [layer.id, layer.name]));
+  return [
+    ...(records.summary.trim()
+      ? [{ id: PROJECT_SUMMARY_SHARE_KEY, title: "Project summary", context: "Project" }]
+      : []),
+    ...records.notes.map((note) => ({
+      id: projectNoteShareKey(note.id),
+      title: note.title || "Untitled project note",
+      context: "Project note",
+    })),
+    ...records.layerNotes
+      .filter((note) => includedLayerIds.has(note.layerId))
+      .map((note) => ({
+        id: layerNoteShareKey(note.id),
+        title: note.subject || "Untitled layer note",
+        context: layerNames.get(note.layerId) ?? "Layer note",
+      })),
+    ...layers
+      .filter((layer) => includedLayerIds.has(layer.id) && !!layer.note?.trim())
+      .map((layer) => ({
+        id: legacyLayerNoteShareKey(layer.id),
+        title: "Layer note",
+        context: layer.name,
+      })),
+  ];
+};
 
 const emptyData: SharingData = { shares: [], members: [], submissions: [] };
 
@@ -232,6 +277,20 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
     return result;
   }, [wb.selectedFeatures]);
   const shareGroups = useMemo(() => flattenedShareGroups(wb.groups), [wb.groups]);
+  const recipientTools = [
+    wb.canPrintMaps ? "print or create PDFs" : "",
+    wb.canExportLayers ? "export shared GIS layers" : "",
+    wb.canViewNotes ? "read the selected notes" : "",
+  ].filter(Boolean);
+  const createNoteOptions = useMemo(
+    () =>
+      noteOptionsFor(
+        wb.records,
+        wb.layers,
+        new Set(wb.layers.filter((layer) => included[layer.id]).map((layer) => layer.id)),
+      ),
+    [included, wb.layers, wb.records],
+  );
 
   const setGroupIncluded = (groupId: string, checked: boolean) => {
     const groupIds = nestedShareGroupIds(groupId, wb.groups);
@@ -376,6 +435,17 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
   };
 
   const managedShare = data.shares.find((share) => share.id === managedShareId) ?? null;
+  const managedNoteOptions = useMemo(
+    () =>
+      managedShare?.projectId === wb.projectId
+        ? noteOptionsFor(
+            wb.records,
+            wb.layers,
+            new Set(managedShare.layerScope.map((entry) => entry.layerId)),
+          )
+        : [],
+    [managedShare, wb.layers, wb.projectId, wb.records],
+  );
   useEffect(() => {
     if (managedShare) setManagedPermissions(managedShare.permissions);
   }, [managedShare]);
@@ -536,7 +606,7 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
               <p className="mt-2 text-muted-foreground">
                 {wb.accessRole === "editor"
                   ? "Your edits are kept in a separate project so the original map remains protected."
-                  : "This map is view only. You can inspect features, switch layers, print, and change the basemap."}
+                  : `This map is view only. You can inspect features and switch layers${recipientTools.length ? `, and you may ${recipientTools.join(", ")}` : ""}.`}
               </p>
               {wb.accessRole === "editor" && wb.activeShare && (
                 <button
@@ -713,7 +783,12 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
                 </div>
               </section>
 
-              <SharingOptions value={permissions} onChange={setPermissions} />
+              <SharingOptions
+                value={permissions}
+                onChange={setPermissions}
+                notes={createNoteOptions}
+                noteSelectionAvailable
+              />
               <button
                 onClick={() => void createShare()}
                 disabled={busy}
@@ -841,7 +916,12 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
                 </button>
               </div>
 
-              <SharingOptions value={managedPermissions} onChange={setManagedPermissions} />
+              <SharingOptions
+                value={managedPermissions}
+                onChange={setManagedPermissions}
+                notes={managedNoteOptions}
+                noteSelectionAvailable={managedShare.projectId === wb.projectId}
+              />
               <button
                 disabled={busy}
                 onClick={() => void savePermissions()}
@@ -1190,10 +1270,23 @@ function Tab({ active, label, onClick }: { active: boolean; label: string; onCli
 function SharingOptions({
   value,
   onChange,
+  notes,
+  noteSelectionAvailable,
 }: {
   value: SharePermissions;
   onChange: (value: SharePermissions) => void;
+  notes: ShareNoteOption[];
+  noteSelectionAvailable: boolean;
 }) {
+  const selectedNoteIds =
+    value.sharedNoteIds === null ? notes.map((note) => note.id) : value.sharedNoteIds;
+  const selectedCount = notes.filter((note) => selectedNoteIds.includes(note.id)).length;
+  const setNoteSelected = (id: string, checked: boolean) => {
+    const next = new Set(selectedNoteIds);
+    if (checked) next.add(id);
+    else next.delete(id);
+    onChange({ ...value, sharedNoteIds: [...next] });
+  };
   return (
     <section
       className="space-y-2 rounded-xl border border-border p-3"
@@ -1203,10 +1296,18 @@ function SharingOptions({
       <label className="flex min-h-9 items-center gap-2">
         <input
           type="checkbox"
+          checked={value.allowPrint}
+          onChange={(e) => onChange({ ...value, allowPrint: e.target.checked })}
+        />
+        Allow printing and PDF creation
+      </label>
+      <label className="flex min-h-9 items-center gap-2">
+        <input
+          type="checkbox"
           checked={value.allowExport}
           onChange={(e) => onChange({ ...value, allowExport: e.target.checked })}
         />
-        Allow export of active layers
+        Allow GIS layer exports
       </label>
       <label className="flex min-h-9 items-center gap-2">
         <input
@@ -1214,8 +1315,67 @@ function SharingOptions({
           checked={value.allowNotes}
           onChange={(e) => onChange({ ...value, allowNotes: e.target.checked })}
         />
-        Allow viewing project and shared-layer notes
+        Share selected notes as read only
       </label>
+      {value.allowNotes && (
+        <div className="rounded-lg border border-border bg-secondary/50 p-2">
+          {noteSelectionAvailable ? (
+            <>
+              <div className="mb-2 flex items-center gap-2">
+                <span className="min-w-0 flex-1 text-[10px] text-muted-foreground">
+                  {selectedCount} of {notes.length} note{notes.length === 1 ? "" : "s"} selected
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onChange({ ...value, sharedNoteIds: notes.map((note) => note.id) })
+                  }
+                  className="rounded-md bg-card px-2 py-1 text-[10px] font-semibold"
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onChange({ ...value, sharedNoteIds: [] })}
+                  className="rounded-md bg-card px-2 py-1 text-[10px] font-semibold"
+                >
+                  Clear
+                </button>
+              </div>
+              <div className="max-h-44 space-y-1 overflow-y-auto">
+                {notes.map((note) => (
+                  <label
+                    key={note.id}
+                    className="flex min-h-9 items-start gap-2 rounded-md bg-card p-2"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedNoteIds.includes(note.id)}
+                      onChange={(event) => setNoteSelected(note.id, event.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{note.title}</span>
+                      <span className="block truncate text-[9px] text-muted-foreground">
+                        {note.context}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+                {!notes.length && (
+                  <p className="p-2 text-[10px] text-muted-foreground">
+                    There are no applicable notes in the selected layers.
+                  </p>
+                )}
+              </div>
+            </>
+          ) : (
+            <p className="text-[10px] text-muted-foreground">
+              Open the source project to review or change which notes are shared.
+            </p>
+          )}
+        </div>
+      )}
       <label className="flex min-h-9 items-center gap-2">
         <input
           type="checkbox"
@@ -1225,8 +1385,8 @@ function SharingOptions({
         Allow recipients to change layer opacity for their own view
       </label>
       <p className="text-[10px] text-muted-foreground">
-        Viewers cannot draw, use AI or map search, or download a project backup. Notes are read only
-        for viewers. Map printing remains available.
+        Viewers cannot draw, use AI or map search, or download a project backup. Printing, PDF, GIS
+        exports, notes, and opacity are controlled independently.
       </p>
     </section>
   );

@@ -165,7 +165,7 @@ function WorkbenchShell() {
           <ElevationProfilePanel />
         </Suspense>
       )}
-      {printOpen && (
+      {printOpen && wb.canPrintMaps && (
         <Suspense fallback={null}>
           <PrintComposer />
         </Suspense>

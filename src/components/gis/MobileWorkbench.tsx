@@ -528,7 +528,7 @@ function MobileShell() {
           <BuildableAreaPanel />
         </Suspense>
       )}
-      {printOpen && (
+      {printOpen && wb.canPrintMaps && (
         <Suspense fallback={null}>
           <PrintComposer />
         </Suspense>
@@ -537,7 +537,9 @@ function MobileShell() {
       {!fieldMode && (
         <nav
           className="panel-surface absolute inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] z-30 grid h-14 rounded-2xl p-1"
-          style={{ gridTemplateColumns: `repeat(${wb.canEditProject ? 6 : 3},minmax(0,1fr))` }}
+          style={{
+            gridTemplateColumns: `repeat(${wb.canEditProject ? 6 : wb.canPrintMaps || wb.canExportLayers ? 3 : 2},minmax(0,1fr))`,
+          }}
         >
           <NavButton
             active={sheet === "layers"}
@@ -587,17 +589,23 @@ function MobileShell() {
               }}
             />
           )}
-          <NavButton
-            active={sheet === "export"}
-            icon={
-              sheet === "export" ? <FileDown className="size-5" /> : <Printer className="size-5" />
-            }
-            label="Export"
-            tourId="top-print"
-            onClick={() => {
-              setSheet(sheet === "export" ? null : "export");
-            }}
-          />
+          {(wb.canPrintMaps || wb.canExportLayers) && (
+            <NavButton
+              active={sheet === "export"}
+              icon={
+                sheet === "export" ? (
+                  <FileDown className="size-5" />
+                ) : (
+                  <Printer className="size-5" />
+                )
+              }
+              label={wb.canExportLayers ? "Export" : "Print"}
+              tourId="top-print"
+              onClick={() => {
+                setSheet(sheet === "export" ? null : "export");
+              }}
+            />
+          )}
         </nav>
       )}
     </div>

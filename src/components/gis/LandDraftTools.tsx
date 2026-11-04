@@ -48,7 +48,7 @@ const modules = [
 
 export function LandDraftTools() {
   const [open, setOpen] = useState(false);
-  const { canEditProject } = useWorkbench();
+  const { canEditProject, canPrintMaps } = useWorkbench();
   const { setAnalysisOpen, setAssistantOpen, setPrintOpen, setSiteDesignerOpen } = useMapRef();
   const actions = [
     {
@@ -74,6 +74,7 @@ export function LandDraftTools() {
       name: "Map & Report Composer",
       description: "Create printable maps with legends and attribution.",
       run: () => setPrintOpen(true),
+      print: true,
     },
   ];
   const card =
@@ -108,7 +109,9 @@ export function LandDraftTools() {
         <section aria-label="Project tools" className="grid gap-2 sm:grid-cols-2">
           <h2 className="text-sm font-semibold sm:col-span-2">Project tools</h2>
           {actions
-            .filter((tool) => !tool.edit || canEditProject)
+            .filter(
+              (tool) => (!tool.edit || canEditProject) && (!("print" in tool) || canPrintMaps),
+            )
             .map((tool) => (
               <button
                 key={tool.name}

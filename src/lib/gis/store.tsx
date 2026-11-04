@@ -448,6 +448,7 @@ export interface WorkbenchApi extends WorkbenchState {
   displayLayers: GisLayer[];
   canEditProject: boolean;
   canExportLayers: boolean;
+  canPrintMaps: boolean;
   canViewNotes: boolean;
   canChangeLayerOpacity: boolean;
   canUseAi: boolean;
