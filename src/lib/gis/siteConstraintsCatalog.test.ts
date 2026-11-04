@@ -10,7 +10,10 @@ test("site screening catalog separates map connections from source-only referenc
   const mapped = siteConstraintsCatalog.filter((entry) => entry.url);
   assert.equal(mapped.length, 23);
   for (const entry of mapped) {
-    assert.equal(entry.requiresViewport, true);
+    if (entry.rendering === "raster-tiles") {
+      assert.match(entry.url ?? "", /\{z\}.*\{y\}.*\{x\}/);
+      assert.equal(entry.requiresViewport, undefined);
+    } else assert.equal(entry.requiresViewport, true);
     assert.ok(entry.minZoom !== undefined);
     assert.ok(entry.sourcePage?.startsWith("https://"));
   }
@@ -18,6 +21,17 @@ test("site screening catalog separates map connections from source-only referenc
     assert.equal(entry.connection, "download");
     assert.ok(entry.sourcePage);
   }
+});
+
+test("replaces the dense contour query with the maintained USGS topographic tile map", () => {
+  assert.equal(
+    siteConstraintsCatalog.some((entry) => entry.id === "usgs-contours"),
+    false,
+  );
+  const topo = siteConstraintsCatalog.find((entry) => entry.id === "usgs-topographic-map");
+  assert.equal(topo?.rendering, "raster-tiles");
+  assert.equal(topo?.agency, "U.S. Geological Survey");
+  assert.match(topo?.sourcePage ?? "", /USGSTopo\/MapServer$/);
 });
 
 test("FEMA floodplain presets use source filters instead of duplicating all flood zones", () => {

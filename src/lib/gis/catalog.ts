@@ -35,6 +35,10 @@ export interface CatalogEntry {
   license: string;
   /** Cartographic defaults applied only when the catalog layer is first added. */
   defaultStyle?: Partial<LayerStyle>;
+  /** Cached image tiles that draw as an overlay rather than queryable features. */
+  rendering?: "features" | "raster-tiles";
+  tileSize?: 256 | 512;
+  maxZoom?: number;
   /** Future state-data entitlement hook. It is metadata only; core mapping stays available. */
   entitlementKey?: string;
 }
@@ -694,7 +698,26 @@ export const catalog: CatalogEntry[] = [
 
 export const categories = Array.from(new Set(catalog.map((entry) => entry.category)));
 // Move user-requested default removals here, retaining their reconnect metadata.
-export const retiredCatalog: CatalogEntry[] = [];
+export const retiredCatalog: CatalogEntry[] = [
+  {
+    id: "usgs-contours",
+    name: "Topographic Index Contours — USGS",
+    agency: "U.S. Geological Survey",
+    geometry: "line",
+    url: "https://carto.nationalmap.gov/arcgis/rest/services/contours/MapServer/25",
+    minZoom: 13,
+    description:
+      "Retired LandDraft connection to the dense large-scale index-contour feature layer. Existing project copies are preserved; reconnect remains available for users who still need that exact source.",
+    keywords: ["terrain", "contours", "topography", "elevation", "slope"],
+    category: "Environment",
+    states: "US",
+    requiresViewport: true,
+    connection: "live",
+    updateCadence: "Retired from shipped defaults 2026-11-04",
+    sourcePage: "https://carto.nationalmap.gov/arcgis/rest/services/contours/MapServer/25",
+    license: "U.S. federal public data; retain attribution and source limitations",
+  },
+];
 export const SURFACE_WATER_CATEGORY = "Surface water & wetlands";
 const surfaceWaterIds = new Set([
   "nhd-flowlines",

@@ -48,6 +48,7 @@ import {
   lineHitId,
   markerIconId,
   imageId,
+  rasterId,
   pointId,
 } from "@/lib/gis/mapStyle";
 import { composeLabel } from "@/lib/gis/labels";
@@ -459,10 +460,18 @@ export function MapCanvas() {
             primaryLabelGeometry(layer),
             layer.source.kind === "remote" ? layer.source.minZoom : null,
             layer.source.kind === "image" ? [layer.source.dataUrl, layer.source.coordinates] : null,
+            layer.source.kind === "raster"
+              ? [
+                  layer.source.tiles,
+                  layer.source.tileSize,
+                  layer.source.minZoom,
+                  layer.source.maxZoom,
+                ]
+              : null,
           ]);
           let existing = map.getSource(sid);
           if (
-            layer.source.kind === "image" &&
+            (layer.source.kind === "image" || layer.source.kind === "raster") &&
             existing &&
             styleSignatureRef.current.get(layer.id) !== styleSignature
           ) {
@@ -481,6 +490,17 @@ export function MapCanvas() {
               });
             }
             sourcePayloadRef.current.delete(sid);
+          } else if (layer.source.kind === "raster") {
+            if (!existing)
+              map.addSource(sid, {
+                type: "raster",
+                tiles: layer.source.tiles,
+                tileSize: layer.source.tileSize,
+                minzoom: layer.source.minZoom ?? 0,
+                maxzoom: layer.source.maxZoom ?? 24,
+                ...(layer.source.attribution ? { attribution: layer.source.attribution } : {}),
+              });
+            sourcePayloadRef.current.delete(sid);
           } else if (existing) {
             if (sourcePayloadRef.current.get(sid) !== fc) (existing as GeoJSONSource).setData(fc);
           } else {
@@ -490,10 +510,15 @@ export function MapCanvas() {
               ...sourcePerformanceOptions(layer, fc.features.length),
             });
           }
-          if (layer.source.kind !== "image") sourcePayloadRef.current.set(sid, fc);
+          if (layer.source.kind !== "image" && layer.source.kind !== "raster")
+            sourcePayloadRef.current.set(sid, fc);
 
           const sentinelLayerId =
-            layer.source.kind === "image" ? imageId(layer.id) : fillId(layer.id);
+            layer.source.kind === "image"
+              ? imageId(layer.id)
+              : layer.source.kind === "raster"
+                ? rasterId(layer.id)
+                : fillId(layer.id);
           if (
             styleSignatureRef.current.get(layer.id) !== styleSignature ||
             !map.getLayer(sentinelLayerId)
@@ -623,7 +648,13 @@ export function MapCanvas() {
   const editableFeature = useMemo(() => {
     if (!editEnabled || !wb.selectedFeature) return null;
     const layer = wb.layers.find((item) => item.id === wb.selectedFeature?.layerId);
-    if (!layer || layer.source.kind === "remote" || layer.source.kind === "image") return null;
+    if (
+      !layer ||
+      layer.source.kind === "remote" ||
+      layer.source.kind === "image" ||
+      layer.source.kind === "raster"
+    )
+      return null;
     const feature = layer.data.features[wb.selectedFeature.index];
     return feature && ["Point", "LineString", "Polygon"].includes(feature.geometry.type)
       ? feature

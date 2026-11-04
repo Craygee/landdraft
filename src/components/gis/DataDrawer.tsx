@@ -185,9 +185,47 @@ export function DataDrawer() {
       (cloudOverride?.verified ? cloudOverride.url : resolveCatalogUrl(entry));
     const existing = wb.layers.find(
       (layer) =>
-        (layer.source.kind === "remote" || layer.source.kind === "import") &&
+        (layer.source.kind === "remote" ||
+          layer.source.kind === "import" ||
+          layer.source.kind === "raster") &&
         layer.source.catalogId === entry.id,
     );
+    if (entry.rendering === "raster-tiles") {
+      if (!resolvedEntryUrl) {
+        toast.error(`${entry.name} has no tile connection.`);
+        return;
+      }
+      if (existing) {
+        wb.updateLayer(existing.id, { visible: true });
+        wb.setActiveLayer(existing.id);
+        toast.success(`${entry.name} is ready`, {
+          description: "The existing topographic overlay was made visible.",
+        });
+        setDrawerOpen(false);
+        return;
+      }
+      const addedLayer = wb.addLayer({
+        name: entry.name,
+        data: { type: "FeatureCollection", features: [] },
+        groupId: "public",
+        source: {
+          kind: "raster",
+          tiles: [resolvedEntryUrl],
+          tileSize: entry.tileSize ?? 256,
+          catalogId: entry.id,
+          attribution: entry.agency,
+          ...(entry.minZoom !== undefined ? { minZoom: entry.minZoom } : {}),
+          ...(entry.maxZoom !== undefined ? { maxZoom: entry.maxZoom } : {}),
+        },
+        style: catalogLayerStyle(entry),
+      });
+      wb.setActiveLayer(addedLayer.id);
+      toast.success(`${entry.name} added`, {
+        description: "The maintained USGS topographic tiles are drawing as a reorderable overlay.",
+      });
+      setDrawerOpen(false);
+      return;
+    }
     // Remote entries may be added repeatedly with different field selections or
     // source filters. Reusing by catalog ID alone silently discards those options.
     if (existing && entry.downloadUrl) {
@@ -833,7 +871,11 @@ export function DataDrawer() {
                         </span>
                         {(entry.url || entry.downloadUrl) && (
                           <span className="rounded-full bg-secondary px-2 py-0.5">
-                            {entry.downloadUrl ? "official shapefile" : "loads current view"}
+                            {entry.downloadUrl
+                              ? "official shapefile"
+                              : entry.rendering === "raster-tiles"
+                                ? "streamed map tiles"
+                                : "loads current view"}
                           </span>
                         )}
                         <span
@@ -865,7 +907,7 @@ export function DataDrawer() {
                           {entry.license}
                         </span>
                       </div>
-                      {entry.url && (
+                      {entry.url && entry.rendering !== "raster-tiles" && (
                         <button
                           onClick={() => void inspectFields(entry)}
                           className="mt-2 flex items-center gap-1 text-[10px] font-medium text-primary hover:underline"

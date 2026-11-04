@@ -255,7 +255,8 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
 
         {selected.length === 1 &&
           first.layer.source.kind !== "remote" &&
-          first.layer.source.kind !== "image" && (
+          first.layer.source.kind !== "image" &&
+          first.layer.source.kind !== "raster" && (
             <Action
               icon={<Pencil />}
               label={editEnabled ? "Finish editing" : "Edit vertices"}

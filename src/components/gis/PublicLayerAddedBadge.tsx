@@ -12,7 +12,7 @@ export function PublicLayerAddedBadge({
   const wb = useWorkbench();
   const matches = wb.displayLayers.filter(
     ({ source }) =>
-      (source.kind === "remote" || source.kind === "import") &&
+      (source.kind === "remote" || source.kind === "import" || source.kind === "raster") &&
       ((catalogId && source.catalogId === catalogId) ||
         (accountServiceId &&
           source.kind === "remote" &&

@@ -64,7 +64,12 @@ export function FeatureDestinationDialog() {
     if (!pending) return [];
     const families = new Set(pending.features.map((feature) => geometryFamily(feature.geometry)));
     return wb.layers.filter((layer) => {
-      if (layer.source.kind === "remote" || layer.source.kind === "image") return false;
+      if (
+        layer.source.kind === "remote" ||
+        layer.source.kind === "image" ||
+        layer.source.kind === "raster"
+      )
+        return false;
       if (layer.data.features.length === 0) return true;
       const layerFamilies = new Set(
         layer.data.features.slice(0, 100).map((feature) => geometryFamily(feature.geometry)),

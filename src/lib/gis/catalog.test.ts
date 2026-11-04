@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { catalog } from "./catalog.ts";
+import { catalog, retiredCatalog } from "./catalog.ts";
 
 test("offers detailed RRC pipeline data without removing the broader EIA layer", () => {
   const rrc = catalog.find((entry) => entry.id === "tx-rrc-pipelines");
@@ -35,4 +35,19 @@ test("offers federal Opportunity Zones as a bounded viewport service", () => {
   assert.equal(zones?.minZoom, 7);
   assert.match(zones?.url ?? "", /Opportunity_Zones\/FeatureServer\/13$/);
   assert.equal(zones?.states, "US");
+});
+
+test("keeps the retired USGS contour source reconnectable without shipping it to new users", () => {
+  assert.equal(
+    catalog.some((entry) => entry.id === "usgs-contours"),
+    false,
+  );
+  assert.equal(
+    retiredCatalog.some((entry) => entry.id === "usgs-contours"),
+    true,
+  );
+  assert.equal(
+    catalog.some((entry) => entry.id === "usgs-topographic-map"),
+    true,
+  );
 });

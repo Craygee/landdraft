@@ -378,6 +378,16 @@ export function PrintComposer() {
             url: layer.source.dataUrl,
             coordinates: layer.source.coordinates,
           });
+      } else if (layer.source.kind === "raster") {
+        if (!source)
+          map.addSource(sid, {
+            type: "raster",
+            tiles: layer.source.tiles,
+            tileSize: layer.source.tileSize,
+            minzoom: layer.source.minZoom ?? 0,
+            maxzoom: layer.source.maxZoom ?? 24,
+            ...(layer.source.attribution ? { attribution: layer.source.attribution } : {}),
+          });
       } else if (source) (source as GeoJSONSource).setData(data);
       else map.addSource(sid, { type: "geojson", data, generateId: true });
       for (const id of allLayerIds(printLayer.id)) if (map.getLayer(id)) map.removeLayer(id);

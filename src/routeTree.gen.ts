@@ -15,6 +15,7 @@ import { Route as MobileRouteImport } from './routes/mobile'
 import { Route as PipelineRouteImport } from './routes/pipeline'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as TermsRouteImport } from './routes/terms'
+import { Route as Terrain3dRouteImport } from './routes/terrain-3d'
 import { Route as WaterRouteImport } from './routes/water'
 import { Route as WeatherRouteImport } from './routes/weather'
 
@@ -48,6 +49,11 @@ const TermsRoute = TermsRouteImport.update({
   path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
+const Terrain3dRoute = Terrain3dRouteImport.update({
+  id: '/terrain-3d',
+  path: '/terrain-3d',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WaterRoute = WaterRouteImport.update({
   id: '/water',
   path: '/water',
@@ -66,6 +72,7 @@ export interface FileRoutesByFullPath {
   '/pipeline': typeof PipelineRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
+  '/terrain-3d': typeof Terrain3dRoute
   '/water': typeof WaterRoute
   '/weather': typeof WeatherRoute
 }
@@ -76,6 +83,7 @@ export interface FileRoutesByTo {
   '/pipeline': typeof PipelineRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
+  '/terrain-3d': typeof Terrain3dRoute
   '/water': typeof WaterRoute
   '/weather': typeof WeatherRoute
 }
@@ -87,6 +95,7 @@ export interface FileRoutesById {
   '/pipeline': typeof PipelineRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
+  '/terrain-3d': typeof Terrain3dRoute
   '/water': typeof WaterRoute
   '/weather': typeof WeatherRoute
 }
@@ -99,6 +108,7 @@ export interface FileRouteTypes {
     | '/pipeline'
     | '/privacy'
     | '/terms'
+    | '/terrain-3d'
     | '/water'
     | '/weather'
   fileRoutesByTo: FileRoutesByTo
@@ -109,6 +119,7 @@ export interface FileRouteTypes {
     | '/pipeline'
     | '/privacy'
     | '/terms'
+    | '/terrain-3d'
     | '/water'
     | '/weather'
   id:
@@ -119,6 +130,7 @@ export interface FileRouteTypes {
     | '/pipeline'
     | '/privacy'
     | '/terms'
+    | '/terrain-3d'
     | '/water'
     | '/weather'
   fileRoutesById: FileRoutesById
@@ -130,6 +142,7 @@ export interface RootRouteChildren {
   PipelineRoute: typeof PipelineRoute
   PrivacyRoute: typeof PrivacyRoute
   TermsRoute: typeof TermsRoute
+  Terrain3dRoute: typeof Terrain3dRoute
   WaterRoute: typeof WaterRoute
   WeatherRoute: typeof WeatherRoute
 }
@@ -178,6 +191,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/terrain-3d': {
+      id: '/terrain-3d'
+      path: '/terrain-3d'
+      fullPath: '/terrain-3d'
+      preLoaderRoute: typeof Terrain3dRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/water': {
       id: '/water'
       path: '/water'
@@ -202,6 +222,7 @@ const rootRouteChildren: RootRouteChildren = {
   PipelineRoute: PipelineRoute,
   PrivacyRoute: PrivacyRoute,
   TermsRoute: TermsRoute,
+  Terrain3dRoute: Terrain3dRoute,
   WaterRoute: WaterRoute,
   WeatherRoute: WeatherRoute,
 }

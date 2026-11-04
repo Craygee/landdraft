@@ -108,6 +108,16 @@ export type LayerSource =
       designSource?: "canva" | "image";
     }
   | {
+      /** XYZ/ArcGIS cached image tiles. The URL remains publisher-hosted and attributed. */
+      kind: "raster";
+      tiles: string[];
+      tileSize: 256 | 512;
+      catalogId?: string;
+      attribution?: string;
+      minZoom?: number;
+      maxZoom?: number;
+    }
+  | {
       kind: "derived";
       sourceLayerId: string;
       query?: string;

@@ -11,6 +11,7 @@ export const lineHitId = (layerId: string) => `line-hit-${layerId}`;
 export const pointId = (layerId: string) => `point-${layerId}`;
 export const markerIconId = (layerId: string) => `marker-${layerId}`;
 export const imageId = (layerId: string) => `image-${layerId}`;
+export const rasterId = (layerId: string) => `raster-${layerId}`;
 export const extrusionId = (layerId: string) => `extrusion-${layerId}`;
 export const labelId = (layerId: string) => `label-${layerId}`;
 export const highlightId = (layerId: string) => `hl-${layerId}`;
@@ -116,6 +117,17 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
         id: imageId(layer.id),
         type: "raster",
         source: src,
+        paint: { "raster-opacity": Math.max(0, Math.min(1, s.fillOpacity)) * layerOpacity(s) },
+      },
+    ];
+  if (layer.source.kind === "raster")
+    return [
+      {
+        id: rasterId(layer.id),
+        type: "raster",
+        source: src,
+        minzoom: layer.source.minZoom ?? 0,
+        maxzoom: layer.source.maxZoom ?? 24,
         paint: { "raster-opacity": Math.max(0, Math.min(1, s.fillOpacity)) * layerOpacity(s) },
       },
     ];
@@ -532,6 +544,7 @@ export const allLayerIds = (layerId: string) => [
   extrusionId(layerId),
   lineHitId(layerId),
   lineId(layerId),
+  rasterId(layerId),
   imageId(layerId),
   fillId(layerId),
 ];

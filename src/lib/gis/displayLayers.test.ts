@@ -85,3 +85,22 @@ test("an unfiltered source and its explicit one-equals-one copy are duplicates",
     ["parent"],
   );
 });
+
+test("parent and subproject copies of a raster public layer draw only once", () => {
+  const first = layer("parent", {
+    kind: "raster",
+    tiles: ["https://example.test/topo/{z}/{y}/{x}.png"],
+    tileSize: 256,
+    catalogId: "public-topo",
+  });
+  const second = layer("child", {
+    kind: "raster",
+    tiles: ["https://example.test/topo/{z}/{y}/{x}.png"],
+    tileSize: 256,
+    catalogId: "public-topo",
+  });
+  assert.deepEqual(
+    dedupePublicDataLayers([first, second]).map((item) => item.id),
+    ["parent"],
+  );
+});

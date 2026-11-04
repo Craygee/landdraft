@@ -68,7 +68,7 @@ export function legendSymbolForLayer(layer: GisLayer): LegendSymbol {
     ? catalog.find((entry) => entry.id === catalogId)?.geometry
     : undefined;
   let kind: LegendSymbolKind =
-    layer.source.kind === "image"
+    layer.source.kind === "image" || layer.source.kind === "raster"
       ? "image"
       : catalogKind
         ? catalogKind

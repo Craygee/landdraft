@@ -209,7 +209,9 @@ export async function probeConnectionUrl(
     const arcgisDataLayer = isQueryableArcgisLayer(url);
     const target = arcgisDataLayer
       ? `${normalizeArcgisLayerUrl(url)}/query?where=1%3D1&returnCountOnly=true&f=json`
-      : url;
+      : /\{z\}|\{x\}|\{y\}/i.test(url)
+        ? basemapProbeUrl(url)
+        : url;
     const response = await fetch(target, { signal: timeout.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
     const contentType = response.headers.get("content-type") ?? "";

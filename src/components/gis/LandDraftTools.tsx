@@ -38,6 +38,12 @@ const modules = [
     description: "Route planning, hydraulic screening, quantities, and estimating.",
     edit: true,
   },
+  {
+    name: "Terrain & Site Context 3D",
+    href: "/terrain-3d",
+    description:
+      "Select a bounded area and explore interactive terrain with wetlands and project context.",
+  },
 ];
 
 export function LandDraftTools() {

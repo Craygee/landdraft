@@ -3,7 +3,7 @@ import { List, X } from "lucide-react";
 import { useWorkbench } from "@/lib/gis/store";
 import { LegendSwatch } from "./LegendSwatch";
 import { useMapRef } from "@/lib/gis/mapRef";
-import { fillId, lineId, pointId, markerIconId, imageId } from "@/lib/gis/mapStyle";
+import { fillId, lineId, pointId, markerIconId, imageId, rasterId } from "@/lib/gis/mapStyle";
 import { legendValuesInView, legendZoomBounds } from "@/lib/gis/legendInView";
 import type { GisLayer } from "@/lib/gis/types";
 import { toast } from "sonner";
@@ -60,6 +60,8 @@ export function MapLegendControl({
               Math.min(...coords.map((p) => p[1])) <= bounds.getNorth()
             )
               next[layer.id] = {};
+          } else if (layer.source.kind === "raster" && map.getLayer(rasterId(layer.id))) {
+            next[layer.id] = {};
           }
         }
         setInView((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));

@@ -35,6 +35,11 @@ function normalizedWhere(value?: string): string {
 }
 
 function sourceIdentity(source: LayerSource): string | null {
+  if (source.kind === "raster") {
+    if (source.catalogId) return `catalog:${source.catalogId}|where:`;
+    const firstTile = source.tiles[0];
+    return firstTile ? `url:${normalizedSourceUrl(firstTile)}|where:` : null;
+  }
   if (source.kind === "remote") {
     const filter = normalizedWhere(source.where);
     if (source.catalogId) return `catalog:${source.catalogId}|where:${filter}`;
