@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  TERRAIN_3D_DEFAULT_ZOOM,
   normalizeTerrainBounds,
   summarizeTerrainGrid,
   summarizeTerrainMesh,
@@ -9,6 +10,10 @@ import {
   terrainBoundary,
   validateTerrainSelection,
 } from "./terrain3d.ts";
+
+test("opens the terrain workspace at the requested zoom level", () => {
+  assert.equal(TERRAIN_3D_DEFAULT_ZOOM, 11);
+});
 
 test("normalizes a two-corner selection and closes its polygon", () => {
   const bounds = normalizeTerrainBounds([-100, 35, -101, 34]);

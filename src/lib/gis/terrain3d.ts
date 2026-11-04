@@ -6,6 +6,7 @@ export type TerrainAnalysisMode = "quick" | "detailed";
 export type TerrainBounds = [west: number, south: number, east: number, north: number];
 
 export const TERRAIN_3D_VERSION = "0.1.0";
+export const TERRAIN_3D_DEFAULT_ZOOM = 11;
 export const TERRAIN_3D_LIMITS_KM2: Record<TerrainAnalysisMode, number> = {
   quick: 100,
   detailed: 4,
@@ -14,6 +15,7 @@ export const TERRAIN_3D_LIMITS_KM2: Record<TerrainAnalysisMode, number> = {
 export const TERRAIN_3D_SOURCES = {
   analysis: "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer",
   terrainTiles: "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
+  baseMap: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
   topographic:
     "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}",
   imagery:

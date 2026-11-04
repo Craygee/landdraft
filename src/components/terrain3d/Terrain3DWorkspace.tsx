@@ -31,6 +31,7 @@ import { useWorkbench } from "@/lib/gis/store";
 import { fetchRemoteGeoJSONPaged } from "@/lib/gis/arcgis";
 import { requestTerrainGrid } from "@/lib/gis/buildableTerrain";
 import {
+  TERRAIN_3D_DEFAULT_ZOOM,
   TERRAIN_3D_LIMITS_KM2,
   TERRAIN_3D_SOURCES,
   normalizeTerrainBounds,
@@ -50,6 +51,7 @@ setWorkerUrl(mapLibreWorkerUrl);
 type Surface = "topographic" | "imagery";
 type WetlandStatus = "idle" | "loading" | "loaded" | "empty" | "error";
 type SummarySource = "usgs-3dep" | "display-mesh-estimate";
+type MapStatus = "loading" | "ready" | "degraded" | "error";
 
 const emptyCollection = (): FeatureCollection => ({ type: "FeatureCollection", features: [] });
 
@@ -58,6 +60,13 @@ function terrainStyle(surface: Surface): StyleSpecification {
   return {
     version: 8,
     sources: {
+      base: {
+        type: "raster",
+        tiles: [TERRAIN_3D_SOURCES.baseMap],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: "© OpenStreetMap contributors",
+      },
       surface: {
         type: "raster",
         tiles: [imagery ? TERRAIN_3D_SOURCES.imagery : TERRAIN_3D_SOURCES.topographic],
@@ -78,6 +87,7 @@ function terrainStyle(surface: Surface): StyleSpecification {
     },
     layers: [
       { id: "background", type: "background", paint: { "background-color": "#dfe8d8" } },
+      { id: "base", type: "raster", source: "base" },
       { id: "surface", type: "raster", source: "surface" },
       {
         id: "terrain-hillshade",
@@ -232,6 +242,7 @@ export function Terrain3DWorkspace() {
   const [loading, setLoading] = useState(false);
   const [exaggeration, setExaggeration] = useState(1.35);
   const [pointerElevation, setPointerElevation] = useState<number | null>(null);
+  const [mapStatus, setMapStatus] = useState<MapStatus>("loading");
 
   boundsRef.current = bounds;
   selectingRef.current = selecting;
@@ -277,20 +288,38 @@ export function Terrain3DWorkspace() {
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
-    const map = new MlMap({
-      container: containerRef.current,
-      style: terrainStyle(surface),
-      center: (wb.mapView.center ?? [-98.5, 31.3]) as LngLatLike,
-      zoom: Math.max(8, wb.mapView.zoom ?? 8),
-      bearing: -24,
-      pitch: 55,
-      attributionControl: { compact: true },
-    });
+    let map: MlMap;
+    try {
+      map = new MlMap({
+        container: containerRef.current,
+        style: terrainStyle(surface),
+        center: (wb.mapView.center ?? [-98.5, 31.3]) as LngLatLike,
+        zoom: TERRAIN_3D_DEFAULT_ZOOM,
+        bearing: -24,
+        pitch: 55,
+        attributionControl: { compact: true },
+      });
+    } catch (error) {
+      console.error("Terrain 3D map initialization failed", error);
+      setMapStatus("error");
+      return;
+    }
     map.addControl(new NavigationControl({ visualizePitch: true }), "top-right");
     map.addControl(new ScaleControl({ unit: "imperial" }), "bottom-right");
     mapRef.current = map;
     setMap(map);
+    const container = containerRef.current;
+    const resizeObserver = new ResizeObserver(() => map.resize());
+    resizeObserver.observe(container);
+    const resizeFrame = requestAnimationFrame(() => map.resize());
+    const onLoad = () => {
+      map.resize();
+      setMapStatus((status) => (status === "degraded" ? status : "ready"));
+    };
+    const onError = () => setMapStatus((status) => (status === "error" ? status : "degraded"));
     const onStyle = () => restoreContext(map);
+    map.on("load", onLoad);
+    map.on("error", onError);
     map.on("style.load", onStyle);
     map.on("mousemove", (event) => {
       const elevation = map.queryTerrainElevation(event.lngLat);
@@ -339,6 +368,11 @@ export function Terrain3DWorkspace() {
     });
     return () => {
       analysisAbortRef.current?.abort();
+      cancelAnimationFrame(resizeFrame);
+      resizeObserver.disconnect();
+      map.off("load", onLoad);
+      map.off("error", onError);
+      map.off("style.load", onStyle);
       map.remove();
       mapRef.current = null;
       setMap(null);
@@ -387,6 +421,15 @@ export function Terrain3DWorkspace() {
     if (mapRef.current) mapRef.current.getCanvas().style.cursor = "crosshair";
     toast.info("Draw a small study area", {
       description: "Tap or click one corner, then the opposite corner.",
+    });
+  };
+
+  const resetZoom = () => {
+    mapRef.current?.easeTo({
+      zoom: TERRAIN_3D_DEFAULT_ZOOM,
+      pitch: 55,
+      bearing: -24,
+      duration: 650,
     });
   };
 
@@ -528,11 +571,36 @@ export function Terrain3DWorkspace() {
           aria-label="Interactive 3D terrain map"
         />
 
-        <div className="pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 flex-col items-center gap-1">
+        {mapStatus === "error" && (
+          <div className="absolute inset-0 z-10 grid place-items-center bg-background/95 p-6 text-center">
+            <div className="max-w-sm rounded-2xl border border-destructive/30 bg-card p-5 shadow-xl">
+              <Mountain className="mx-auto size-8 text-destructive" />
+              <h2 className="mt-2 font-bold">The 3D map could not start</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Reload this page. If the problem continues, check that WebGL is enabled in the
+                browser.
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 flex-col items-center gap-1">
           <div className="rounded-full border border-border bg-card/95 px-3 py-1.5 text-[11px] font-semibold shadow-lg backdrop-blur">
             <Rotate3D className="mr-1 inline size-3.5" /> Drag to pan · right-drag/two fingers to
             orbit
           </div>
+          <button
+            type="button"
+            onClick={resetZoom}
+            className="rounded-full border border-border bg-card/95 px-3 py-1 text-[10px] font-bold shadow-md backdrop-blur hover:bg-accent"
+          >
+            Zoom {TERRAIN_3D_DEFAULT_ZOOM}
+          </button>
+          {mapStatus === "degraded" && (
+            <div className="max-w-[260px] rounded-full bg-amber-100 px-3 py-1 text-center text-[10px] font-semibold text-amber-950 shadow-md">
+              A terrain layer is unavailable; the base map remains visible.
+            </div>
+          )}
           {pointerElevation !== null && (
             <div className="rounded-full bg-foreground/80 px-3 py-1 text-[10px] text-background">
               Display mesh ≈ {feet(pointerElevation)}
