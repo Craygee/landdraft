@@ -44,6 +44,12 @@ const modules = [
     description:
       "Select a bounded area and explore interactive terrain with wetlands and project context.",
   },
+  {
+    name: "Study Area Report",
+    href: "/study-report",
+    description:
+      "Create an editable, source-attributed report with mapped figures, profiles and explicit data gaps.",
+  },
 ];
 
 export function LandDraftTools() {

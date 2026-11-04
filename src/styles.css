@@ -571,6 +571,11 @@
 }
 
 @media print {
+  @page study-report {
+    size: letter portrait;
+    margin: 0;
+  }
+
   @page {
     margin: 0;
   }
@@ -588,12 +593,44 @@
   }
 
   .print-composer,
-  .print-composer * {
+  .print-composer *,
+  .study-report-print,
+  .study-report-print * {
     visibility: visible !important;
   }
 
-  .print-composer-ui {
+  .print-composer-ui,
+  .study-report-ui {
     display: none !important;
+  }
+
+  .study-report-print {
+    position: absolute !important;
+    inset: auto !important;
+    left: 0 !important;
+    top: 0 !important;
+    display: block !important;
+    width: 8.5in !important;
+    background: white !important;
+  }
+
+  .study-report-page {
+    page: study-report;
+    width: 8.5in !important;
+    min-height: 11in !important;
+    height: auto !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    break-after: page;
+    page-break-after: always;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .study-report-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
   }
 
   .print-composer {

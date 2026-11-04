@@ -35,6 +35,8 @@ import type { PipelineEngineeringState } from "@/lib/pipeline/types";
 import { normalizePipelineEngineeringState } from "@/lib/pipeline/model";
 import type { WeatherWorkspaceState } from "@/lib/weather/types";
 import { normalizeWeatherWorkspace } from "@/lib/weather/model";
+import type { StudyReportWorkspaceState } from "@/lib/studyReport/types";
+import { normalizeStudyReportWorkspace } from "@/lib/studyReport/model";
 import {
   workspaceProjectStore,
   type ProjectSummary,
@@ -105,6 +107,7 @@ interface WorkbenchState {
   pipelineEngineering: PipelineEngineeringState | undefined;
   weatherWorkspace: WeatherWorkspaceState | undefined;
   waterWorkspace: WaterWorkspaceState | undefined;
+  studyReport: StudyReportWorkspaceState | undefined;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -147,6 +150,7 @@ const initialState = (): WorkbenchState => ({
   pipelineEngineering: undefined,
   weatherWorkspace: undefined,
   waterWorkspace: undefined,
+  studyReport: undefined,
 });
 
 const blankProjectState = (name: string): ProjectState => ({
@@ -321,6 +325,9 @@ const normalizedProject = (
     weatherWorkspace: stored.weatherWorkspace
       ? normalizeWeatherWorkspace(stored.weatherWorkspace)
       : undefined,
+    studyReport: stored.studyReport
+      ? normalizeStudyReportWorkspace(stored.studyReport, stored.name)
+      : undefined,
   };
 };
 
@@ -345,6 +352,7 @@ const stateToProject = (state: WorkbenchState): ProjectState => ({
   ...(state.pipelineEngineering ? { pipelineEngineering: state.pipelineEngineering } : {}),
   ...(state.waterWorkspace ? { waterWorkspace: state.waterWorkspace } : {}),
   ...(state.weatherWorkspace ? { weatherWorkspace: state.weatherWorkspace } : {}),
+  ...(state.studyReport ? { studyReport: state.studyReport } : {}),
   ...(state.shareSource ? { shareSource: state.shareSource } : {}),
 });
 
@@ -416,6 +424,7 @@ export interface WorkbenchApi extends WorkbenchState {
   setPipelineEngineering: (state: PipelineEngineeringState | undefined) => void;
   setWaterWorkspace: (state: WaterWorkspaceState | undefined) => void;
   setWeatherWorkspace: (state: WeatherWorkspaceState | undefined) => void;
+  setStudyReport: (state: StudyReportWorkspaceState | undefined) => void;
   addProjectEvent: (input: {
     type: ProjectEventType;
     title: string;
@@ -1430,6 +1439,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     (weatherWorkspace) => patch({ weatherWorkspace }),
     [patch],
   );
+  const setStudyReport = useCallback<WorkbenchApi["setStudyReport"]>(
+    (studyReport) => patch({ studyReport }),
+    [patch],
+  );
 
   const addProjectEvent = useCallback<WorkbenchApi["addProjectEvent"]>(
     (input) =>
@@ -2059,6 +2072,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     state.pipelineEngineering,
     state.weatherWorkspace,
     state.waterWorkspace,
+    state.studyReport,
     state.units,
     state.accessRole,
   ]);
@@ -2159,6 +2173,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       setPipelineEngineering,
       setWeatherWorkspace,
       setWaterWorkspace,
+      setStudyReport,
       addProjectEvent,
       saveProject,
       createProject,
@@ -2223,6 +2238,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       setPipelineEngineering,
       setWeatherWorkspace,
       setWaterWorkspace,
+      setStudyReport,
       addProjectEvent,
       saveProject,
       createProject,
