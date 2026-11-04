@@ -58,6 +58,13 @@ export const infrastructureCatalog: CatalogEntry[] = [
     ],
     license:
       "Publisher terms: None (Public Use); read source metadata and retain attribution. Historical HIFLD archive.",
+    entitlementKey: "data.state.TX",
+    defaultStyle: {
+      pointIcon: "⊠",
+      pointIconSize: 20,
+      pointIconColor: "#dc2626",
+      fillOpacity: 0,
+    },
   },
   ...[
     {
@@ -175,6 +182,32 @@ export const infrastructureCatalog: CatalogEntry[] = [
     ],
     license:
       "Restricted: Platts Master Service Agreement required by publisher terms; commercial reuse not established.",
+    entitlementKey: "data.state.TX",
+  },
+  {
+    id: "tx-iou-service-areas-reference",
+    name: "Texas Investor-Owned Utility Service Areas — Restricted Source",
+    agency: "Public Utility Commission of Texas / Platts",
+    category: "Energy",
+    geometry: "polygon",
+    states: ["TX"],
+    sourcePage:
+      "https://services6.arcgis.com/N6Lzvtb46cpxThhu/arcgis/rest/services/IOU/FeatureServer/300",
+    connection: "download",
+    updateCadence: "Publisher metadata describes July 2020 edits",
+    description:
+      "Requested IOU service. Reference only: the layer is described as unofficial and its original source is Platts. LandDraft does not enable unrestricted commercial querying until reuse rights are documented. Official certified boundaries remain in PUCT records and dockets. Item: f7edde48d50140fe93a6fd4797693a9c.",
+    keywords: [
+      "investor owned utility",
+      "iou",
+      "electric",
+      "utility",
+      "service territory",
+      "data center",
+    ],
+    license:
+      "Restricted/unclear commercial reuse: original source Platts; obtain documented permission before enabling.",
+    entitlementKey: "data.state.TX",
   },
   {
     id: "tx-broadband-coverage-reference",

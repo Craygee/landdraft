@@ -47,7 +47,8 @@ const emptyData: SharingData = { shares: [], members: [], submissions: [] };
 const roleHelp: Record<ShareRole, string> = {
   viewer: "Can explore the shared map and attributes, but cannot change data.",
   editor: "Gets a separate editable copy that the map administrator can review.",
-  admin: "Can directly edit the original project and manage sharing.",
+  admin:
+    "Live collaborator: directly edits the original project. Saved changes sync across collaborators; avoid editing the same feature simultaneously.",
 };
 
 const mapViewFrom = (map: ReturnType<typeof useMapRef>["map"], fallback: MapViewState) => {
@@ -66,11 +67,21 @@ const shareViewForScope = (
   fallback: MapViewState,
   scope: ShareLayerScope[],
   layers: ReturnType<typeof useWorkbench>["layers"],
+  extentMode: "automatic" | "current" | "layer" = "automatic",
+  initialLayerId?: string,
 ): MapViewState => {
-  if (!map) return fallback;
+  if (!map)
+    return {
+      ...fallback,
+      shareExtentMode: extentMode,
+      ...(extentMode === "layer" && initialLayerId ? { shareInitialLayerId: initialLayerId } : {}),
+    };
+  if (extentMode === "current")
+    return { ...mapViewFrom(map, fallback), shareExtentMode: "current" };
   const candidates = scope.flatMap((entry) => {
+    if (extentMode === "layer" && entry.layerId !== initialLayerId) return [];
     const layer = layers.find((item) => item.id === entry.layerId);
-    if (!layer || !layer.visible) return [];
+    if (!layer || (extentMode === "automatic" && !layer.visible)) return [];
     const selected = entry.featureIndexes ? new Set(entry.featureIndexes) : null;
     const features = selected
       ? layer.data.features.filter((_, index) => selected.has(index))
@@ -92,7 +103,12 @@ const shareViewForScope = (
     }
   });
   const largest = candidates.sort((a, b) => b.score - a.score)[0];
-  if (!largest) return mapViewFrom(map, fallback);
+  if (!largest)
+    return {
+      ...mapViewFrom(map, fallback),
+      shareExtentMode: extentMode,
+      ...(extentMode === "layer" && initialLayerId ? { shareInitialLayerId: initialLayerId } : {}),
+    };
   try {
     const camera = map.cameraForBounds(largest.bounds, { padding: 70, maxZoom: 16 });
     if (!camera?.center) return mapViewFrom(map, fallback);
@@ -106,9 +122,15 @@ const shareViewForScope = (
       zoom: camera.zoom ?? map.getZoom(),
       bearing: camera.bearing ?? map.getBearing(),
       pitch: map.getPitch(),
+      shareExtentMode: extentMode,
+      ...(extentMode === "layer" && initialLayerId ? { shareInitialLayerId: initialLayerId } : {}),
     };
   } catch {
-    return mapViewFrom(map, fallback);
+    return {
+      ...mapViewFrom(map, fallback),
+      shareExtentMode: extentMode,
+      ...(extentMode === "layer" && initialLayerId ? { shareInitialLayerId: initialLayerId } : {}),
+    };
   }
 };
 
@@ -171,6 +193,11 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
   });
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<ShareRole>("viewer");
+  const [extentMode, setExtentMode] = useState<"automatic" | "current" | "layer">("automatic");
+  const [extentLayerId, setExtentLayerId] = useState("");
+  const [memberScopeEditorId, setMemberScopeEditorId] = useState<string | null>(null);
+  const [memberUsesUniversal, setMemberUsesUniversal] = useState(true);
+  const [memberIncluded, setMemberIncluded] = useState<Record<string, boolean>>({});
 
   const refresh = useCallback(async () => {
     const userId = auth.user?.id;
@@ -238,10 +265,21 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
       toast.error("Choose at least one layer to share");
       return;
     }
+    if (extentMode === "layer" && !scope.some((entry) => entry.layerId === extentLayerId)) {
+      toast.error("Choose an included layer for the initial shared-map extent");
+      return;
+    }
     setBusy(true);
     try {
       await wb.saveProject("manual");
-      const mapView = shareViewForScope(map, wb.mapView, scope, wb.layers);
+      const mapView = shareViewForScope(
+        map,
+        wb.mapView,
+        scope,
+        wb.layers,
+        extentMode,
+        extentLayerId || undefined,
+      );
       const projectState = scopedShareState(
         wb.toProjectState(),
         wb.layers,
@@ -286,9 +324,20 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
       toast.error("Choose at least one layer to share");
       return;
     }
+    if (extentMode === "layer" && !scope.some((entry) => entry.layerId === extentLayerId)) {
+      toast.error("Choose an included layer for the initial shared-map extent");
+      return;
+    }
     setBusy(true);
     try {
-      const mapView = shareViewForScope(map, wb.mapView, scope, wb.layers);
+      const mapView = shareViewForScope(
+        map,
+        wb.mapView,
+        scope,
+        wb.layers,
+        extentMode,
+        extentLayerId || undefined,
+      );
       await shareStore.updateSnapshot({
         share,
         userId,
@@ -298,9 +347,24 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
         name: shareName,
         permissions: managedPermissions,
       });
+      for (const member of data.members.filter(
+        (item) => item.shareId === share.id && item.layerScope !== null,
+      )) {
+        await shareStore.updateMemberScope({
+          share,
+          member,
+          userId,
+          state: wb.toProjectState(),
+          liveLayers: wb.layers,
+          mapView,
+          layerScope: member.layerScope,
+          permissions: managedPermissions,
+        });
+      }
       await refresh();
       toast.success("Shared map updated", {
-        description: "Recipients will see this extent and selected content next time they open it.",
+        description:
+          "Recipients will receive the new extent and layers automatically; personal opacity choices stay on their device.",
       });
     } catch (error) {
       toast.error("Shared map could not be updated", {
@@ -324,6 +388,21 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
         userId: auth.user.id,
         permissions: managedPermissions,
       });
+      if (managedShare.projectId === wb.projectId) {
+        for (const member of data.members.filter(
+          (item) => item.shareId === managedShare.id && item.layerScope !== null,
+        ))
+          await shareStore.updateMemberScope({
+            share: managedShare,
+            member,
+            userId: auth.user.id,
+            state: wb.toProjectState(),
+            liveLayers: wb.layers,
+            mapView: managedShare.mapView,
+            layerScope: member.layerScope,
+            permissions: managedPermissions,
+          });
+      }
       await refresh();
       toast.success("Sharing options saved");
     } catch (error) {
@@ -365,6 +444,49 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
       toast.error("Person could not be added", {
         description: error instanceof Error ? error.message : "Check the email and try again.",
       });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveMemberLayerScope = async (member: ShareMember) => {
+    if (!managedShare || !auth.user) return;
+    const scope = memberUsesUniversal
+      ? null
+      : wb.layers.flatMap((layer) =>
+          memberIncluded[layer.id] ? [{ layerId: layer.id, featureIndexes: null }] : [],
+        );
+    if (scope && !scope.length) {
+      toast.error("Choose at least one layer for this person or use the universal default.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const mapView = shareViewForScope(
+        map,
+        wb.mapView,
+        scope ?? managedShare.layerScope,
+        wb.layers,
+        extentMode,
+        extentLayerId || undefined,
+      );
+      await shareStore.updateMemberScope({
+        share: managedShare,
+        member,
+        userId: auth.user.id,
+        state: wb.toProjectState(),
+        liveLayers: wb.layers,
+        mapView,
+        layerScope: scope,
+        permissions: managedPermissions,
+      });
+      setMemberScopeEditorId(null);
+      await refresh();
+      toast.success(
+        scope ? `Personal layers saved for ${member.email}` : "Universal layers restored",
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Personal layers could not be saved");
     } finally {
       setBusy(false);
     }
@@ -443,8 +565,56 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
                   className="w-full rounded-lg border border-border bg-card px-2 py-2 outline-none focus:border-primary"
                 />
                 <p className="text-[10px] text-muted-foreground">
-                  The current map extent, zoom, basemap, styles, and visible state are captured.
+                  The basemap, styles, visible state, and startup extent below are captured.
                 </p>
+              </section>
+
+              <section className="space-y-2 rounded-xl border border-border p-3">
+                <h3 className="font-semibold">Initial shared-map extent</h3>
+                <label className="flex min-h-9 items-center gap-2">
+                  <input
+                    type="radio"
+                    name="share-extent"
+                    checked={extentMode === "automatic"}
+                    onChange={() => setExtentMode("automatic")}
+                  />
+                  Automatic · largest visible shared layer
+                </label>
+                <label className="flex min-h-9 items-center gap-2">
+                  <input
+                    type="radio"
+                    name="share-extent"
+                    checked={extentMode === "current"}
+                    onChange={() => setExtentMode("current")}
+                  />
+                  Current map view
+                </label>
+                <label className="flex min-h-9 items-center gap-2">
+                  <input
+                    type="radio"
+                    name="share-extent"
+                    checked={extentMode === "layer"}
+                    onChange={() => setExtentMode("layer")}
+                  />
+                  Selected layer extent
+                </label>
+                {extentMode === "layer" && (
+                  <select
+                    value={extentLayerId}
+                    onChange={(event) => setExtentLayerId(event.target.value)}
+                    className="min-h-10 w-full rounded-lg border border-border bg-card px-2"
+                    aria-label="Layer used for initial shared extent"
+                  >
+                    <option value="">Choose a shared layer…</option>
+                    {wb.layers
+                      .filter((layer) => included[layer.id])
+                      .map((layer) => (
+                        <option key={layer.id} value={layer.id}>
+                          {layer.name}
+                        </option>
+                      ))}
+                  </select>
+                )}
               </section>
 
               <section className="rounded-xl border border-border">
@@ -614,6 +784,8 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
                           ]),
                         ),
                       );
+                      setExtentMode(share.mapView.shareExtentMode ?? "automatic");
+                      setExtentLayerId(share.mapView.shareInitialLayerId ?? "");
                     }}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-accent",
@@ -698,7 +870,7 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
                 >
                   <option value="viewer">View only</option>
                   <option value="editor">Editor copy</option>
-                  <option value="admin">Admin</option>
+                  <option value="admin">Live collaborator</option>
                 </select>
                 <button
                   onClick={() => void invite()}
@@ -713,68 +885,132 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
 
               <div className="space-y-1">
                 {managedMembers.map((member) => (
-                  <div
-                    key={member.id}
-                    className="flex items-center gap-2 rounded-lg bg-secondary p-2"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium">{member.email}</div>
-                      <div className="text-[9px] text-muted-foreground">
-                        {member.acceptedAt ? "Access active" : "Invited · account required"}
+                  <div key={member.id} className="space-y-2 rounded-lg bg-secondary p-2">
+                    <div className="flex items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium">{member.email}</div>
+                        <div className="text-[9px] text-muted-foreground">
+                          {member.acceptedAt ? "Access active" : "Invited · account required"}
+                        </div>
                       </div>
-                    </div>
-                    <select
-                      value={member.role}
-                      onChange={(event) =>
-                        void shareStore
-                          .updateMember(member.id, event.target.value as ShareRole)
-                          .then(refresh)
-                      }
-                      className="rounded-lg border border-border bg-card px-2 py-1"
-                    >
-                      <option value="viewer">Viewer</option>
-                      <option value="editor">Editor</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => {
-                        setBusy(true);
-                        void shareStore
-                          .invite(managedShare.id, member.email, member.role)
-                          .then((result) => {
-                            if (result.emailSent)
-                              toast.success("Invitation email resent", {
-                                description: `Sent to ${member.email}.`,
-                              });
-                            else
-                              toast.warning("Email was not sent", {
+                      <select
+                        value={member.role}
+                        onChange={(event) =>
+                          void shareStore
+                            .updateMember(member.id, event.target.value as ShareRole)
+                            .then(refresh)
+                        }
+                        className="rounded-lg border border-border bg-card px-2 py-1"
+                      >
+                        <option value="viewer">Viewer</option>
+                        <option value="editor">Editor</option>
+                        <option value="admin">Live collaborator</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const opening = memberScopeEditorId !== member.id;
+                          setMemberScopeEditorId(opening ? member.id : null);
+                          if (opening) {
+                            setMemberUsesUniversal(member.layerScope === null);
+                            setMemberIncluded(
+                              Object.fromEntries(
+                                wb.layers.map((layer) => [
+                                  layer.id,
+                                  member.layerScope === null
+                                    ? managedShare.layerScope.some(
+                                        (entry) => entry.layerId === layer.id,
+                                      )
+                                    : member.layerScope.some((entry) => entry.layerId === layer.id),
+                                ]),
+                              ),
+                            );
+                          }
+                        }}
+                        className="rounded-lg border border-border bg-card px-2 py-1 text-[10px] font-semibold"
+                        title="Choose universal or person-specific layers"
+                      >
+                        Layers
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          setBusy(true);
+                          void shareStore
+                            .invite(managedShare.id, member.email, member.role)
+                            .then((result) => {
+                              if (result.emailSent)
+                                toast.success("Invitation email resent", {
+                                  description: `Sent to ${member.email}.`,
+                                });
+                              else
+                                toast.warning("Email was not sent", {
+                                  description:
+                                    result.warning ?? "Outbound email is temporarily unavailable.",
+                                });
+                            })
+                            .catch((error: unknown) =>
+                              toast.error("Invitation could not be resent", {
                                 description:
-                                  result.warning ?? "Outbound email is temporarily unavailable.",
-                              });
-                          })
-                          .catch((error: unknown) =>
-                            toast.error("Invitation could not be resent", {
-                              description:
-                                error instanceof Error ? error.message : "Try again shortly.",
-                            }),
-                          )
-                          .finally(() => setBusy(false));
-                      }}
-                      className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
-                      title="Resend invitation email"
-                      aria-label={`Resend invitation email to ${member.email}`}
-                    >
-                      <Send className="size-3.5" />
-                    </button>
-                    <button
-                      onClick={() => void shareStore.removeMember(member.id).then(refresh)}
-                      className="rounded-lg p-1.5 text-destructive hover:bg-destructive/10"
-                      title="Remove access"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
+                                  error instanceof Error ? error.message : "Try again shortly.",
+                              }),
+                            )
+                            .finally(() => setBusy(false));
+                        }}
+                        className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+                        title="Resend invitation email"
+                        aria-label={`Resend invitation email to ${member.email}`}
+                      >
+                        <Send className="size-3.5" />
+                      </button>
+                      <button
+                        onClick={() => void shareStore.removeMember(member.id).then(refresh)}
+                        className="rounded-lg p-1.5 text-destructive hover:bg-destructive/10"
+                        title="Remove access"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
+                    {memberScopeEditorId === member.id && (
+                      <div className="ml-3 space-y-2 rounded-xl border border-primary/25 bg-card p-2">
+                        <label className="flex min-h-9 items-center gap-2 font-medium">
+                          <input
+                            type="checkbox"
+                            checked={memberUsesUniversal}
+                            onChange={(event) => setMemberUsesUniversal(event.target.checked)}
+                          />
+                          Use universal default layers
+                        </label>
+                        {!memberUsesUniversal && (
+                          <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg bg-secondary/60 p-2">
+                            {wb.layers.map((layer) => (
+                              <label key={layer.id} className="flex items-center gap-2 py-1">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(memberIncluded[layer.id])}
+                                  onChange={(event) =>
+                                    setMemberIncluded((current) => ({
+                                      ...current,
+                                      [layer.id]: event.target.checked,
+                                    }))
+                                  }
+                                />
+                                <span className="min-w-0 flex-1 truncate">{layer.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void saveMemberLayerScope(member)}
+                          className="w-full rounded-lg bg-primary px-3 py-2 font-semibold text-primary-foreground disabled:opacity-50"
+                        >
+                          Save layers for this person
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -979,6 +1215,14 @@ function SharingOptions({
           onChange={(e) => onChange({ ...value, allowNotes: e.target.checked })}
         />
         Allow viewing project and shared-layer notes
+      </label>
+      <label className="flex min-h-9 items-center gap-2">
+        <input
+          type="checkbox"
+          checked={value.allowLayerOpacity}
+          onChange={(e) => onChange({ ...value, allowLayerOpacity: e.target.checked })}
+        />
+        Allow recipients to change layer opacity for their own view
       </label>
       <p className="text-[10px] text-muted-foreground">
         Viewers cannot draw, use AI or map search, or download a project backup. Notes are read only

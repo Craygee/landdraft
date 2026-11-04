@@ -48,13 +48,15 @@ const start = (height: number, title: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="${height}" viewBox="0 0 1000 ${height}" role="img" aria-label="${esc(title)}"><rect width="1000" height="${height}" fill="white"/><g font-family="Arial, sans-serif">`;
 export function elevationCsv(saved: SavedElevationProfile): string {
   return [
-    "distance_m,longitude,latitude,elevation_m,grade_percent,slope_degrees,resolution_m",
+    "distance_m,longitude,latitude,elevation_m,observed,interpolated,grade_percent,slope_degrees,resolution_m",
     ...saved.profile.points.map((p) =>
       [
         p.stationM,
         p.longitude,
         p.latitude,
         p.elevationM ?? "",
+        p.observed,
+        p.interpolated,
         p.gradePercent ?? "",
         p.slopeDegrees ?? "",
         p.resolutionM ?? "",
@@ -71,7 +73,10 @@ export function elevationGeoJSON(saved: SavedElevationProfile): FeatureCollectio
     retrievedAt: new Date(saved.profile.retrievedAt).toISOString(),
     distanceM: saved.profile.distanceM,
     missingSamples: saved.profile.missing,
-    note: "Sampled bare-earth terrain; not a survey. Missing elevations remain NULL; no slope is bridged across gaps.",
+    note:
+      saved.profile.interpolated > 0
+        ? "Sampled bare-earth terrain; not a survey. Interpolated values are estimates between or beside observed samples."
+        : "Sampled bare-earth terrain; not a survey. Missing elevations remain NULL; no slope is bridged across gaps.",
   };
   return {
     type: "FeatureCollection",
@@ -88,6 +93,8 @@ export function elevationGeoJSON(saved: SavedElevationProfile): FeatureCollectio
           kind: "sample",
           stationM: p.stationM,
           elevationM: p.elevationM,
+          observed: p.observed,
+          interpolated: p.interpolated,
           gradePercent: p.gradePercent,
           slopeDegrees: p.slopeDegrees,
           resolutionM: p.resolutionM ?? null,

@@ -3,12 +3,21 @@ import { emptyProjectRecords } from "./types.ts";
 export interface SharePermissions {
   allowExport: boolean;
   allowNotes: boolean;
+  allowLayerOpacity: boolean;
 }
-export const NEW_SHARE_PERMISSIONS: SharePermissions = { allowExport: true, allowNotes: false };
+export const NEW_SHARE_PERMISSIONS: SharePermissions = {
+  allowExport: true,
+  allowNotes: false,
+  allowLayerOpacity: true,
+};
 /** Existing links retain their previous note access until the owner changes the options. */
 export function sharePermissions(value: unknown): SharePermissions {
   const input = (value && typeof value === "object" ? value : {}) as Partial<SharePermissions>;
-  return { allowExport: input.allowExport !== false, allowNotes: input.allowNotes !== false };
+  return {
+    allowExport: input.allowExport !== false,
+    allowNotes: input.allowNotes !== false,
+    allowLayerOpacity: input.allowLayerOpacity !== false,
+  };
 }
 export function sharedCapabilities(role: string, permissions?: SharePermissions) {
   const edit = role === "owner" || role === "admin";
@@ -17,6 +26,7 @@ export function sharedCapabilities(role: string, permissions?: SharePermissions)
     canEditProject: edit,
     canExportLayers: edit || policy.allowExport,
     canViewNotes: edit || policy.allowNotes,
+    canChangeLayerOpacity: edit || policy.allowLayerOpacity,
     canUseAi: edit,
     canSearchMap: edit,
     canBackupProject: edit,

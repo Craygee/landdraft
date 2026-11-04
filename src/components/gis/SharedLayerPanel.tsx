@@ -108,6 +108,29 @@ export function SharedLayerPanel() {
             <Table2 className="size-3.5" />
           </button>
         </div>
+        {wb.canChangeLayerOpacity && (
+          <label
+            className="flex items-center gap-2 px-8 py-1 text-[9px] text-muted-foreground"
+            title={`Change ${layer.name} opacity for your view`}
+          >
+            Opacity
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={layer.style.opacity ?? 1}
+              onChange={(event) =>
+                wb.updateStyle(layer.id, { opacity: Number(event.target.value) })
+              }
+              className="min-w-0 flex-1 accent-primary"
+              aria-label={`${layer.name} opacity`}
+            />
+            <span className="num w-7 text-right">
+              {Math.round((layer.style.opacity ?? 1) * 100)}%
+            </span>
+          </label>
+        )}
         {container && expanded && (
           <div className="mt-1 space-y-1 border-l border-primary/25 pl-1">
             {wb.layers

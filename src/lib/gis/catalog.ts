@@ -1,5 +1,6 @@
 import { siteConstraintsCatalog } from "./siteConstraintsCatalog.ts";
 import { infrastructureCatalog } from "./infrastructureCatalog.ts";
+import type { LayerStyle } from "./types.ts";
 export type CatalogCategory =
   | "Property"
   | "Oil & Gas"
@@ -32,9 +33,17 @@ export interface CatalogEntry {
   updateCadence: string;
   states: string[] | "US";
   license: string;
+  /** Cartographic defaults applied only when the catalog layer is first added. */
+  defaultStyle?: Partial<LayerStyle>;
+  /** Future state-data entitlement hook. It is metadata only; core mapping stays available. */
+  entitlementKey?: string;
 }
 
-const tx = (entry: Omit<CatalogEntry, "states">): CatalogEntry => ({ ...entry, states: ["TX"] });
+const tx = (entry: Omit<CatalogEntry, "states">): CatalogEntry => ({
+  ...entry,
+  states: ["TX"],
+  entitlementKey: entry.entitlementKey ?? "data.state.TX",
+});
 const live = { connection: "live" as const, updateCadence: "Publisher managed" };
 
 /** Curated public-agency services. Download records are clearly marked and never masquerade as APIs. */
@@ -60,6 +69,64 @@ export const catalog: CatalogEntry[] = [
     license:
       "CC0-1.0 — TxGIO collection license. Contributing appraisal districts; provided AS-IS, not authoritative cadastral surveys.",
   }),
+  {
+    id: "fl-parcels-statewide",
+    name: "Florida Land Parcels — Statewide",
+    agency: "Florida Department of Revenue / Florida Geographic Information Office",
+    category: "Property",
+    geometry: "polygon",
+    ...live,
+    states: ["FL"],
+    entitlementKey: "data.state.FL",
+    description:
+      "Official statewide cadastral compilation from all 67 county property appraisers. Loaded only for the visible map area; confidential records are subject to Florida redaction requirements. Not a survey.",
+    url: "https://services9.arcgis.com/Gh9awoU677aKree0/ArcGIS/rest/services/Florida_Statewide_Cadastral/FeatureServer/0",
+    sourcePage: "https://geodata.floridagio.gov/",
+    keywords: ["parcel", "property", "cadastral", "tax roll", "appraiser"],
+    requiresViewport: true,
+    minZoom: 12,
+    license:
+      "Florida open data; county property appraisers and Florida DOR attribution. AS-IS and not a legal survey.",
+    defaultStyle: { fillOpacity: 0, strokeColor: "#2f7d4f", strokeWidth: 1 },
+  },
+  {
+    id: "ct-parcels-statewide",
+    name: "Connecticut Parcels & CAMA — Statewide",
+    agency: "Connecticut GIS Office / Office of Policy and Management",
+    category: "Property",
+    geometry: "polygon",
+    ...live,
+    states: ["CT"],
+    entitlementKey: "data.state.CT",
+    description:
+      "Official statewide standardized parcel and CAMA compilation collected through regional councils of governments. Municipal completeness, owner suppression and spatial accuracy vary. Not a survey.",
+    url: "https://services3.arcgis.com/3FL1kr7L4LvwA2Kb/ArcGIS/rest/services/Connecticut_CAMA_and_Parcel_Layer/FeatureServer/0",
+    sourcePage: "https://portal.ct.gov/datapolicy/gis-office/parcel-and-cama",
+    keywords: ["parcel", "property", "cama", "assessment", "municipal"],
+    requiresViewport: true,
+    minZoom: 12,
+    license: "Connecticut public GIS data; dataset-specific disclaimers apply.",
+    defaultStyle: { fillOpacity: 0, strokeColor: "#2f7d4f", strokeWidth: 1 },
+  },
+  {
+    id: "oh-parcels-statewide",
+    name: "Ohio Land Parcels — Statewide Public View",
+    agency: "Ohio Geographically Referenced Information Program",
+    category: "Property",
+    geometry: "polygon",
+    ...live,
+    states: ["OH"],
+    entitlementKey: "data.state.OH",
+    description:
+      "Official public view compiled from county-maintained parcel and assessment records. Provided AS-IS for informational use; owner fields are not represented as complete. Not a survey.",
+    url: "https://services2.arcgis.com/MlJ0G8iWUyC7jAmu/arcgis/rest/services/OhioStatewidePacels_full_view/FeatureServer/0",
+    sourcePage: "https://www.arcgis.com/home/item.html?id=26ab5fad8d5d4258a7492a14de83bc0e",
+    keywords: ["parcel", "property", "cadastral", "assessment", "county"],
+    requiresViewport: true,
+    minZoom: 12,
+    license: "State of Ohio public-use geospatial data; AS-IS disclaimer applies.",
+    defaultStyle: { fillOpacity: 0, strokeColor: "#2f7d4f", strokeWidth: 1 },
+  },
   tx({
     id: "txdot-roadways",
     name: "State Roadways",
@@ -204,13 +271,14 @@ export const catalog: CatalogEntry[] = [
     keywords: ["aquifer", "groundwater", "minor"],
     license: "Texas public data",
   }),
-  tx({
+  {
     id: "tx-transmission",
-    name: "Electric Transmission Lines",
+    name: "U.S. Electric Transmission Lines",
     agency: "U.S. Energy Information Administration",
     category: "Energy",
     geometry: "line",
     ...live,
+    states: "US",
     description:
       "Transmission corridors with voltage and connected-substation attributes where available.",
     url: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/ArcGIS/rest/services/US_Electric_Power_Transmission_Lines/FeatureServer/0",
@@ -219,7 +287,26 @@ export const catalog: CatalogEntry[] = [
     requiresViewport: true,
     minZoom: 6,
     license: "U.S. public data",
-  }),
+    defaultStyle: {
+      fillOpacity: 0,
+      strokeWidth: 2.5,
+      strokePattern: "dashed",
+      categorized: {
+        enabled: true,
+        field: "VOLT_CLASS",
+        rules: [
+          { value: "UNDER 100", label: "Under 100 kV", color: "#74a9cf", visible: true },
+          { value: "100-161", label: "100–161 kV", color: "#2b8cbe", visible: true },
+          { value: "220-287", label: "220–287 kV", color: "#7b3294", visible: true },
+          { value: "345", label: "345 kV", color: "#d7301f", visible: true },
+          { value: "500", label: "500 kV", color: "#ef6c00", visible: true },
+          { value: "735 AND ABOVE", label: "735+ kV", color: "#8b0000", visible: true },
+        ],
+        fallbackColor: "#6b7280",
+        fallbackVisible: true,
+      },
+    },
+  },
   tx({
     id: "tx-rrc-pipelines",
     name: "Texas RRC Pipelines — Detailed",
@@ -246,6 +333,28 @@ export const catalog: CatalogEntry[] = [
     minZoom: 10,
     countyField: "COUNTY_NAME",
     license: "Texas public records",
+    defaultStyle: {
+      fillOpacity: 0,
+      strokeWidth: 2.5,
+      categorized: {
+        enabled: true,
+        field: "COMMODITY1",
+        rules: [
+          { value: "NGT", label: "Natural gas transmission", color: "#f59e0b", visible: true },
+          { value: "NGG", label: "Natural gas gathering", color: "#fbbf24", visible: true },
+          { value: "NGZ", label: "Natural gas offshore", color: "#d97706", visible: true },
+          { value: "CRO", label: "Crude oil transmission", color: "#111827", visible: true },
+          { value: "CRL", label: "Crude oil gathering", color: "#4b5563", visible: true },
+          { value: "CFL", label: "Full well stream", color: "#78716c", visible: true },
+          { value: "HVL", label: "Highly volatile liquid", color: "#db2777", visible: true },
+          { value: "PRD", label: "Refined product", color: "#2563eb", visible: true },
+          { value: "CO2", label: "Carbon dioxide", color: "#16a34a", visible: true },
+          { value: "AA", label: "Anhydrous ammonia", color: "#7c3aed", visible: true },
+        ],
+        fallbackColor: "#9ca3af",
+        fallbackVisible: true,
+      },
+    },
   }),
   tx({
     id: "rrc-pipeline-county-downloads",
@@ -261,13 +370,14 @@ export const catalog: CatalogEntry[] = [
     keywords: ["pipeline", "shapefile", "zip", "county", "rrc", "t-4 permit"],
     license: "Texas public records",
   }),
-  tx({
+  {
     id: "tx-pipelines",
     name: "U.S. Natural Gas Transmission Pipelines (EIA)",
     agency: "U.S. Energy Information Administration",
     category: "Energy",
     geometry: "line",
     ...live,
+    states: "US",
     description:
       "National interstate and intrastate natural-gas transmission corridors. This generalized EIA layer is separate from the detailed Texas RRC system.",
     url: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/Natural_Gas_Interstate_and_Intrastate_Pipelines_1/FeatureServer/0",
@@ -276,7 +386,22 @@ export const catalog: CatalogEntry[] = [
     requiresViewport: true,
     minZoom: 6,
     license: "U.S. public data",
-  }),
+    defaultStyle: {
+      fillOpacity: 0,
+      strokeWidth: 2.5,
+      categorized: {
+        enabled: true,
+        field: "TYPEPIPE",
+        rules: [
+          { value: "Interstate", label: "Interstate", color: "#ed5151", visible: true },
+          { value: "Intrastate", label: "Intrastate", color: "#149ece", visible: true },
+          { value: "Gathering", label: "Gathering", color: "#a7c636", visible: true },
+        ],
+        fallbackColor: "#9ca3af",
+        fallbackVisible: true,
+      },
+    },
+  },
   {
     id: "us-wind-turbines",
     name: "Wind Turbine Locations",
@@ -292,6 +417,12 @@ export const catalog: CatalogEntry[] = [
     requiresViewport: true,
     minZoom: 7,
     license: "U.S. public data",
+    defaultStyle: {
+      pointIcon: "ϒ",
+      pointIconSize: 20,
+      pointIconColor: "#2563eb",
+      fillOpacity: 0,
+    },
   },
   {
     id: "us-solar",
@@ -414,6 +545,77 @@ export const catalog: CatalogEntry[] = [
     keywords: ["wildlife", "habitat", "park", "ecology", "species", "conservation"],
     license: "Texas public data; dataset-specific terms",
   }),
+  {
+    id: "us-counties-current",
+    name: "U.S. Counties — Current",
+    agency: "U.S. Census Bureau TIGERweb",
+    category: "Boundaries",
+    geometry: "polygon",
+    ...live,
+    states: "US",
+    description:
+      "Current Census county and statistical-equivalent boundaries for all states and territories.",
+    url: "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1",
+    sourcePage: "https://tigerweb.geo.census.gov/tigerwebmain/TIGERweb_restmapservice.html",
+    keywords: ["county", "borough", "parish", "fips", "boundary"],
+    requiresViewport: true,
+    minZoom: 5,
+    license: "U.S. Census Bureau public data",
+    defaultStyle: { fillOpacity: 0.04, strokeColor: "#475569", strokeWidth: 1.2 },
+  },
+  {
+    id: "us-incorporated-places-current",
+    name: "U.S. Incorporated Places — Current",
+    agency: "U.S. Census Bureau TIGERweb",
+    category: "Boundaries",
+    geometry: "polygon",
+    ...live,
+    states: "US",
+    description:
+      "Current incorporated-place boundaries nationwide. Census-designated places are available from the same official service as a separate layer.",
+    url: "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Places_CouSub_ConCity_SubMCD/MapServer/4",
+    sourcePage: "https://tigerweb.geo.census.gov/tigerwebmain/TIGERweb_restmapservice.html",
+    keywords: ["city", "town", "village", "municipal", "place", "boundary"],
+    requiresViewport: true,
+    minZoom: 7,
+    license: "U.S. Census Bureau public data",
+    defaultStyle: { fillOpacity: 0.05, strokeColor: "#0f766e", strokeWidth: 1.2 },
+  },
+  {
+    id: "us-primary-roads-current",
+    name: "U.S. Primary Roads — Current",
+    agency: "U.S. Census Bureau TIGERweb",
+    category: "Transportation",
+    geometry: "line",
+    ...live,
+    states: "US",
+    description: "Current primary-road centerlines nationwide for regional access screening.",
+    url: "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer/2",
+    sourcePage: "https://tigerweb.geo.census.gov/tigerwebmain/TIGERweb_restmapservice.html",
+    keywords: ["road", "highway", "interstate", "transportation", "access"],
+    requiresViewport: true,
+    minZoom: 5,
+    license: "U.S. Census Bureau public data",
+    defaultStyle: { fillOpacity: 0, strokeColor: "#d97706", strokeWidth: 2.2 },
+  },
+  {
+    id: "us-local-roads-current",
+    name: "U.S. Local Roads — Current",
+    agency: "U.S. Census Bureau TIGERweb",
+    category: "Transportation",
+    geometry: "line",
+    ...live,
+    states: "US",
+    description:
+      "Detailed current local-road centerlines. Zoom-dependent loading prevents national overfetching.",
+    url: "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer/8",
+    sourcePage: "https://tigerweb.geo.census.gov/tigerwebmain/TIGERweb_restmapservice.html",
+    keywords: ["local road", "street", "transportation", "access"],
+    requiresViewport: true,
+    minZoom: 12,
+    license: "U.S. Census Bureau public data",
+    defaultStyle: { fillOpacity: 0, strokeColor: "#64748b", strokeWidth: 1.2 },
+  },
   {
     id: "us-state-boundaries-shp",
     name: "U.S. State Boundaries — 2025 Shapefile",

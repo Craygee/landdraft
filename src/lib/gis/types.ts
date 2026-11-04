@@ -389,6 +389,10 @@ export interface MapViewState {
   zoom: number;
   bearing: number;
   pitch: number;
+  /** Shared-map startup behavior. Older shares omit this and retain automatic extent behavior. */
+  shareExtentMode?: "automatic" | "current" | "layer";
+  /** Layer whose extent should be used when shareExtentMode is `layer`. */
+  shareInitialLayerId?: string;
 }
 
 export interface ConnectionRecoveryHint {

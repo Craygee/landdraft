@@ -307,6 +307,7 @@ export function MapCanvas() {
     const map = mapObj.current;
     const share = wb.activeShare;
     if (!map || !ready || !share) return;
+    if (share.mapView.shareExtentMode && share.mapView.shareExtentMode !== "automatic") return;
     const shareKey = `${share.id}:${share.updatedAt}`;
     if (fittedShareRef.current === shareKey) return;
     const largest = wb.displayLayers

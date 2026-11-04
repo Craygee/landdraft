@@ -13,6 +13,7 @@ import type { FeatureCollection, Position } from "geojson";
 import type { GeoJSONSource, MapMouseEvent } from "maplibre-gl";
 import { ChevronDown, ChevronUp, Download, Loader2, Mountain, RotateCcw, X } from "lucide-react";
 import { useMapRef } from "@/lib/gis/mapRef";
+import { cn } from "@/lib/utils";
 import {
   profileStations,
   requestElevationProfile,
@@ -41,7 +42,9 @@ export function ElevationProfilePanel() {
   const [active, setActive] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
   const [windowM, setWindowM] = useState<[number, number] | null>(null);
-  const [spacing, setSpacing] = useState(10);
+  const [analysisMode, setAnalysisMode] = useState<"quick" | "advanced">("quick");
+  const [pointsPerUnit, setPointsPerUnit] = useState(100);
+  const [fillMissing, setFillMissing] = useState(true);
   const [chartWidth, setChartWidth] = useState(1000);
   const abortRef = useRef<AbortController | null>(null);
   const panelRef = useRef<HTMLElement>(null);
@@ -51,11 +54,12 @@ export function ElevationProfilePanel() {
   const requestId = useRef(0);
   const stations = useMemo(() => {
     try {
-      return profileStations(coordinates, spacing);
+      const spacingM = analysisMode === "quick" ? 1 : (metric ? 1000 : 1609.344) / pointsPerUnit;
+      return profileStations(coordinates, spacingM, analysisMode === "quick" ? 64 : 384);
     } catch {
       return [];
     }
-  }, [coordinates, spacing]);
+  }, [analysisMode, coordinates, metric, pointsPerUnit]);
   const distanceM = profile?.distanceM ?? stations.at(-1)?.stationM ?? 0;
   const selected = profile?.points[active];
   const distanceUnit = metric ? "km" : "mi";
@@ -78,11 +82,13 @@ export function ElevationProfilePanel() {
     setProfile(null);
     setWindowM(null);
     try {
+      const spacingM = analysisMode === "quick" ? 1 : (metric ? 1000 : 1609.344) / pointsPerUnit;
       const result = await requestElevationProfile(
         current.coordinates,
-        spacing,
+        spacingM,
         controller.signal,
         (done, total) => setProgress(`${done}/${total} samples`),
+        { maxSamples: analysisMode === "quick" ? 64 : 384, fillMissing },
       );
       if (controller.signal.aborted || generation !== requestId.current) return;
       if (result.points.every((p) => p.elevationM === null))
@@ -97,7 +103,7 @@ export function ElevationProfilePanel() {
     } finally {
       if (generation === requestId.current) setLoading(false);
     }
-  }, [spacing]);
+  }, [analysisMode, fillMissing, metric, pointsPerUnit]);
   finishRef.current = () => void generate();
 
   useEffect(
@@ -549,19 +555,51 @@ export function ElevationProfilePanel() {
                   Edit path
                 </button>
               )}
-              <label className="flex items-center gap-1">
-                Target spacing{" "}
-                <select
-                  value={spacing}
-                  disabled={loading}
-                  onChange={(e) => setSpacing(Number(e.target.value))}
-                  className="min-h-11 rounded-xl border bg-card px-2 text-base sm:text-xs"
+              <div className="flex min-h-11 rounded-xl border bg-secondary p-1">
+                <button
+                  type="button"
+                  onClick={() => setAnalysisMode("quick")}
+                  className={cn(
+                    "rounded-lg px-3 text-xs font-semibold",
+                    analysisMode === "quick" && "bg-card shadow-sm",
+                  )}
                 >
-                  <option value={10}>10 m</option>
-                  <option value={25}>25 m</option>
-                  <option value={50}>50 m</option>
-                  <option value={100}>100 m</option>
-                </select>
+                  Quick average
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAnalysisMode("advanced")}
+                  className={cn(
+                    "rounded-lg px-3 text-xs font-semibold",
+                    analysisMode === "advanced" && "bg-card shadow-sm",
+                  )}
+                >
+                  Detailed
+                </button>
+              </div>
+              {analysisMode === "advanced" && (
+                <label className="flex items-center gap-1">
+                  Points per {metric ? "km" : "mile"}{" "}
+                  <input
+                    type="number"
+                    min={1}
+                    max={500}
+                    value={pointsPerUnit}
+                    disabled={loading}
+                    onChange={(event) =>
+                      setPointsPerUnit(Math.max(1, Math.min(500, Number(event.target.value) || 1)))
+                    }
+                    className="min-h-11 w-20 rounded-xl border bg-card px-2 text-base sm:text-xs"
+                  />
+                </label>
+              )}
+              <label className="flex min-h-11 items-center gap-2 rounded-xl border px-3">
+                <input
+                  type="checkbox"
+                  checked={fillMissing}
+                  onChange={(event) => setFillMissing(event.target.checked)}
+                />
+                Connect missing samples with estimated terrain
               </label>
               <button
                 disabled={coordinates.length < 2 || loading}
@@ -608,7 +646,7 @@ export function ElevationProfilePanel() {
                 {distanceValue(distanceM).toFixed(3)} {distanceUnit}
               </strong>
             </span>
-            {profile && profile.maximumSpacingM > spacing * 1.5 && (
+            {profile && analysisMode === "advanced" && profile.points.length >= 384 && (
               <p role="status" className="my-1 text-xs text-amber-800">
                 Long route: the 384-sample limit increased spacing to{" "}
                 {profile.maximumSpacingM.toFixed(1)} m. Shorten the path for closer sampling.
@@ -616,8 +654,10 @@ export function ElevationProfilePanel() {
             )}
             {profile?.missing ? (
               <p role="status" className="my-1 text-xs text-amber-800">
-                {profile.missing} of {profile.points.length} elevations are missing. Gaps are shown;
-                gain/loss totals are partial.
+                {profile.missing} of {profile.points.length} source elevations were missing.{" "}
+                {profile.interpolated
+                  ? `${profile.interpolated} are visibly connected as estimates; observed samples remain identified in exports.`
+                  : "Gaps are shown and gain/loss totals are partial."}
               </p>
             ) : null}
             {profile && (

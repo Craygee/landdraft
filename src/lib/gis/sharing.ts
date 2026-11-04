@@ -46,6 +46,10 @@ export interface ShareMember {
   role: ShareRole;
   active: boolean;
   acceptedAt: number | null;
+  /** Null means this recipient follows the universal share layer selection. */
+  layerScope: ShareLayerScope[] | null;
+  /** Separate protected snapshot used only for a personalized scope. */
+  statePath: string | null;
 }
 
 export interface ShareInvitationResult {
@@ -88,6 +92,8 @@ interface MemberRow {
   role: ShareRole;
   active: boolean;
   accepted_at: string | null;
+  layer_scope: ShareLayerScope[] | null;
+  state_path: string | null;
 }
 
 interface SubmissionRow {
@@ -104,7 +110,8 @@ interface SubmissionRow {
 
 const SHARE_SELECT =
   "id,project_id,owner_id,name,state_path,map_view,layer_scope,active,created_at,updated_at";
-const MEMBER_SELECT = "id,share_id,user_id,invited_email,role,active,accepted_at";
+const MEMBER_SELECT =
+  "id,share_id,user_id,invited_email,role,active,accepted_at,layer_scope,state_path";
 const SUBMISSION_SELECT =
   "id,share_id,source_project_id,copy_project_id,submitted_by,status,note,created_at,updated_at";
 
@@ -118,7 +125,32 @@ const mapMember = (row: MemberRow): ShareMember => ({
   role: row.role,
   active: row.active,
   acceptedAt: row.accepted_at ? new Date(row.accepted_at).getTime() : null,
+  layerScope: Array.isArray(row.layer_scope) ? row.layer_scope : null,
+  statePath: row.state_path || null,
 });
+
+const memberFor = (
+  row: ShareRow,
+  members: MemberRow[],
+  userId: string,
+  email: string,
+): MemberRow | null => {
+  if (row.owner_id === userId) return null;
+  const normalizedEmail = email.trim().toLowerCase();
+  return (
+    members
+      .filter(
+        (member) =>
+          member.share_id === row.id &&
+          member.active &&
+          (member.user_id === userId || member.invited_email.toLowerCase() === normalizedEmail),
+      )
+      .sort(
+        (a, b) =>
+          ({ admin: 3, editor: 2, viewer: 1 })[b.role] - { admin: 3, editor: 2, viewer: 1 }[a.role],
+      )[0] ?? null
+  );
+};
 
 const mapSubmission = (row: SubmissionRow): ShareSubmission => ({
   id: row.id,
@@ -151,14 +183,18 @@ const roleFor = (
   return matches.some((member) => member.role === "viewer") ? "viewer" : null;
 };
 
-const mapShare = (row: ShareRow, role: ShareRole): MapShare => ({
+const mapShare = (row: ShareRow, role: ShareRole, member: MemberRow | null = null): MapShare => ({
   id: row.id,
   projectId: row.project_id,
   ownerId: row.owner_id,
   name: row.name,
-  statePath: row.state_path,
+  statePath: member?.state_path || row.state_path,
   mapView: row.map_view,
-  layerScope: Array.isArray(row.layer_scope) ? row.layer_scope : [],
+  layerScope: Array.isArray(member?.layer_scope)
+    ? member.layer_scope
+    : Array.isArray(row.layer_scope)
+      ? row.layer_scope
+      : [],
   permissions: sharePermissions(row.map_view?.sharePermissions),
   active: row.active,
   role,
@@ -173,6 +209,21 @@ const uploadShareState = async (
   state: ProjectState,
 ) => {
   const path = `${userId}/${projectId}/shares/${shareId}/state.json`;
+  await uploadPrivateProjectFile(
+    path,
+    new Blob([JSON.stringify(state)], { type: "application/json" }),
+  );
+  return path;
+};
+
+const uploadMemberShareState = async (
+  userId: string,
+  projectId: string,
+  shareId: string,
+  memberId: string,
+  state: ProjectState,
+) => {
+  const path = `${userId}/${projectId}/shares/${shareId}/members/${memberId}/state.json`;
   await uploadPrivateProjectFile(
     path,
     new Blob([JSON.stringify(state)], { type: "application/json" }),
@@ -278,7 +329,7 @@ export const shareStore = {
     ]);
     const shares = rows.flatMap((row) => {
       const role = roleFor(row, memberRows, userId, email);
-      return role ? [mapShare(row, role)] : [];
+      return role ? [mapShare(row, role, memberFor(row, memberRows, userId, email))] : [];
     });
     return {
       shares,
@@ -299,7 +350,7 @@ export const shareStore = {
     const row = rows[0];
     if (!row) return null;
     const role = roleFor(row, memberRows, userId, email);
-    return role ? mapShare(row, role) : null;
+    return role ? mapShare(row, role, memberFor(row, memberRows, userId, email)) : null;
   },
 
   async create(input: {
@@ -408,6 +459,44 @@ export const shareStore = {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
       body: JSON.stringify({ role }),
+    });
+  },
+
+  async updateMemberScope(input: {
+    share: MapShare;
+    member: ShareMember;
+    userId: string;
+    state: ProjectState;
+    liveLayers: GisLayer[];
+    mapView: MapViewState;
+    layerScope: ShareLayerScope[] | null;
+    permissions?: SharePermissions;
+  }): Promise<void> {
+    const permissions = input.permissions ?? input.share.permissions;
+    let statePath: string | null = null;
+    if (input.layerScope) {
+      const snapshot = scopedShareState(
+        input.state,
+        input.liveLayers,
+        input.layerScope,
+        input.mapView,
+        permissions,
+      );
+      statePath = await uploadMemberShareState(
+        input.userId,
+        input.share.projectId,
+        input.share.id,
+        input.member.id,
+        snapshot,
+      );
+    }
+    await cloudDataRequest("/rest/v1/rpc/set_share_member_scope", {
+      method: "POST",
+      body: JSON.stringify({
+        p_member_id: input.member.id,
+        p_layer_scope: input.layerScope,
+        p_state_path: statePath,
+      }),
     });
   },
 

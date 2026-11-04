@@ -84,6 +84,29 @@ test("missing elevations never become zero or create a slope across a coverage g
   assert.equal(p.missing, 1);
   assert.equal(analyzeProfile(response([null, null])).minimumM, null);
 });
+test("quick review can interpolate missing elevations while preserving provenance", () => {
+  const p = analyzeProfile(response([100, null, 200, null]), true);
+  assert.equal(p.points[1]!.elevationM, 150);
+  assert.equal(p.points[1]!.observed, false);
+  assert.equal(p.points[1]!.interpolated, true);
+  assert.equal(p.points[3]!.elevationM, 200);
+  assert.equal(p.missing, 2);
+  assert.equal(p.interpolated, 2);
+  assert.equal(p.minimumM, 100);
+  assert.equal(p.maximumM, 200);
+});
+test("quick sampling honors a smaller requested sample budget", () => {
+  const samples = profileStations(
+    [
+      [-105, 39],
+      [-104.5, 39],
+    ],
+    1,
+    64,
+  );
+  assert.ok(samples.length <= 64);
+  assert.equal(samples[0]!.stationM, 0);
+});
 test("profile batches stay bounded, maintain ordering and reject mismatched coordinates", async (t) => {
   const sizes: number[] = [];
   t.mock.method(globalThis, "fetch", async (_url: unknown, options: RequestInit) => {

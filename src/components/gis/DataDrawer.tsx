@@ -58,6 +58,7 @@ import { cn } from "@/lib/utils";
 import { importFile } from "@/lib/gis/import";
 
 const catalogLayerStyle = (entry: CatalogEntry) => {
+  const published = entry.defaultStyle ?? {};
   if (entry.id === "tx-parcels")
     return {
       fillOpacity: 0,
@@ -68,6 +69,7 @@ const catalogLayerStyle = (entry: CatalogEntry) => {
       labelMinZoom: 11,
       labelSize: 11,
       labelScaleWithZoom: true,
+      ...published,
     };
   if (entry.id === "us-state-boundaries-shp")
     return {
@@ -79,6 +81,7 @@ const catalogLayerStyle = (entry: CatalogEntry) => {
       labelTemplate: "{NAME}",
       labelFields: ["NAME"],
       labelSize: 12,
+      ...published,
     };
   if (entry.id === "us-opportunity-zones")
     return {
@@ -87,9 +90,10 @@ const catalogLayerStyle = (entry: CatalogEntry) => {
       strokeColor: "#6b3fa0",
       fillColor: "#8a5bb8",
       labelEnabled: false,
+      ...published,
     };
-  if (entry.geometry === "line") return { fillOpacity: 0, strokeWidth: 2.5 };
-  return {};
+  if (entry.geometry === "line") return { fillOpacity: 0, strokeWidth: 2.5, ...published };
+  return published;
 };
 
 export function DataDrawer() {
@@ -823,6 +827,9 @@ export function DataDrawer() {
                         </span>
                         <span className="rounded-full bg-secondary px-2 py-0.5">
                           {entry.geometry}
+                        </span>
+                        <span className="rounded-full bg-secondary px-2 py-0.5">
+                          {entry.states === "US" ? "Nationwide" : entry.states.join(", ")}
                         </span>
                         {(entry.url || entry.downloadUrl) && (
                           <span className="rounded-full bg-secondary px-2 py-0.5">

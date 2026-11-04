@@ -13,6 +13,8 @@ export const PROFILE_DEFAULT_SPACING_M = 10;
 export interface ProfilePoint extends TerrainSampleResponsePoint {
   gradePercent: number | null;
   slopeDegrees: number | null;
+  observed: boolean;
+  interpolated: boolean;
 }
 export interface ElevationProfile {
   points: ProfilePoint[];
@@ -23,6 +25,7 @@ export interface ElevationProfile {
   descentM: number;
   steepestGradePercent: number | null;
   missing: number;
+  interpolated: number;
   maximumSpacingM: number;
   source: string;
   verticalDatum: string;
@@ -33,6 +36,7 @@ export interface ElevationProfile {
 export function profileStations(
   coordinates: Position[],
   spacingM = PROFILE_DEFAULT_SPACING_M,
+  maxSamples = PROFILE_MAX_SAMPLES,
 ): TerrainSampleRequestPoint[] {
   if (
     coordinates.length < 2 ||
@@ -60,7 +64,8 @@ export function profileStations(
   const total = length(line, { units: "meters" });
   if (total < 1 || total > PROFILE_MAX_LENGTH_M)
     throw new Error("Choose a path between 1 meter and 100 km.");
-  const intervals = Math.min(Math.ceil(total / spacingM), PROFILE_MAX_SAMPLES - clean.length + 1);
+  const boundedMaximum = Math.max(clean.length, Math.min(PROFILE_MAX_SAMPLES, maxSamples));
+  const intervals = Math.min(Math.ceil(total / spacingM), boundedMaximum - clean.length + 1);
   const distances = Array.from({ length: intervals + 1 }, (_, i) =>
     i === intervals ? total : (total * i) / intervals,
   );
@@ -83,23 +88,53 @@ export function profileStations(
     });
 }
 
-export function analyzeProfile(response: TerrainSampleResponse): ElevationProfile {
+function filledElevations(points: TerrainSampleResponsePoint[]): Array<number | null> {
+  const result = points.map((point) =>
+    typeof point.elevationM === "number" && Number.isFinite(point.elevationM)
+      ? point.elevationM
+      : null,
+  );
+  const observed = result.flatMap((value, index) => (value === null ? [] : [index]));
+  if (!observed.length) return result;
+  for (let index = 0; index < result.length; index++) {
+    if (result[index] !== null) continue;
+    const left = [...observed].reverse().find((candidate) => candidate < index);
+    const right = observed.find((candidate) => candidate > index);
+    if (left === undefined) result[index] = result[right!]!;
+    else if (right === undefined) result[index] = result[left]!;
+    else {
+      const start = points[left]!.stationM;
+      const end = points[right]!.stationM;
+      const ratio = end === start ? 0 : (points[index]!.stationM - start) / (end - start);
+      result[index] = result[left]! + (result[right]! - result[left]!) * ratio;
+    }
+  }
+  return result;
+}
+
+export function analyzeProfile(
+  response: TerrainSampleResponse,
+  fillMissing = false,
+): ElevationProfile {
   let ascentM = 0,
     descentM = 0,
     maximumSpacingM = 0;
+  const originalElevations = response.points.map((point) =>
+    typeof point.elevationM === "number" && Number.isFinite(point.elevationM)
+      ? point.elevationM
+      : null,
+  );
+  const elevationsForAnalysis = fillMissing
+    ? filledElevations(response.points)
+    : originalElevations;
   const points: ProfilePoint[] = response.points.map((p, i) => {
-    const elevationM =
-      typeof p.elevationM === "number" && Number.isFinite(p.elevationM) ? p.elevationM : null;
+    const elevationM = elevationsForAnalysis[i] ?? null;
     const previous = response.points[i - 1];
+    const previousElevation = elevationsForAnalysis[i - 1] ?? null;
     const dx = previous ? p.stationM - previous.stationM : 0;
     maximumSpacingM = Math.max(maximumSpacingM, dx);
-    const valid =
-      elevationM !== null &&
-      previous &&
-      typeof previous.elevationM === "number" &&
-      Number.isFinite(previous.elevationM) &&
-      dx > 0;
-    const dz = valid ? elevationM! - previous!.elevationM! : null;
+    const valid = elevationM !== null && previous && previousElevation !== null && dx > 0;
+    const dz = valid ? elevationM! - previousElevation! : null;
     if (dz !== null) {
       ascentM += Math.max(0, dz);
       descentM += Math.max(0, -dz);
@@ -108,6 +143,8 @@ export function analyzeProfile(response: TerrainSampleResponse): ElevationProfil
     return {
       ...p,
       elevationM,
+      observed: originalElevations[i] !== null,
+      interpolated: originalElevations[i] === null && elevationM !== null,
       gradePercent,
       slopeDegrees: gradePercent === null ? null : (Math.atan(gradePercent / 100) * 180) / Math.PI,
     };
@@ -122,7 +159,8 @@ export function analyzeProfile(response: TerrainSampleResponse): ElevationProfil
     ascentM,
     descentM,
     steepestGradePercent: grades.length ? Math.max(...grades) : null,
-    missing: points.length - elevations.length,
+    missing: originalElevations.filter((value) => value === null).length,
+    interpolated: points.filter((point) => point.interpolated).length,
     maximumSpacingM,
     source: response.source,
     verticalDatum: response.verticalDatum,
@@ -135,9 +173,10 @@ export async function requestElevationProfile(
   spacingM: number,
   signal: AbortSignal,
   progress: (done: number, total: number) => void = () => {},
+  options: { maxSamples?: number; fillMissing?: boolean } = {},
 ): Promise<ElevationProfile> {
   signal.throwIfAborted();
-  const stations = profileStations(coordinates, spacingM);
+  const stations = profileStations(coordinates, spacingM, options.maxSamples);
   const collected: TerrainSampleResponsePoint[] = [];
   let provenance: TerrainSampleResponse | null = null;
   progress(0, stations.length);
@@ -177,5 +216,5 @@ export async function requestElevationProfile(
     progress(collected.length, stations.length);
   }
   if (!provenance) throw new Error("No terrain samples were returned.");
-  return analyzeProfile({ ...provenance, points: collected });
+  return analyzeProfile({ ...provenance, points: collected }, options.fillMissing);
 }

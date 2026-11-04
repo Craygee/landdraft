@@ -447,6 +447,7 @@ export interface WorkbenchApi extends WorkbenchState {
   canEditProject: boolean;
   canExportLayers: boolean;
   canViewNotes: boolean;
+  canChangeLayerOpacity: boolean;
   canUseAi: boolean;
   canSearchMap: boolean;
   canBackupProject: boolean;
@@ -608,10 +609,46 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         }));
         return;
       }
+      const displayPreferences =
+        stateRef.current.activeShare?.id === share.id
+          ? new Map(
+              stateRef.current.layers.map((layer) => [
+                layer.id,
+                {
+                  visible: layer.visible,
+                  opacity: layer.style.opacity,
+                  fillOpacity: layer.style.fillOpacity,
+                  strokeOpacity: layer.style.strokeOpacity,
+                  pointIconOpacity: layer.style.pointIconOpacity,
+                  labelOpacity: layer.style.labelOpacity,
+                },
+              ]),
+            )
+          : null;
       const sharedState = applySharePermissions(
         await downloadSharedState(share.statePath),
         share.permissions,
       );
+      if (displayPreferences) {
+        sharedState.layers = sharedState.layers.map((layer) => {
+          const preference = displayPreferences.get(layer.id);
+          if (!preference) return layer;
+          return {
+            ...layer,
+            visible: preference.visible,
+            style: {
+              ...layer.style,
+              ...(preference.opacity === undefined ? {} : { opacity: preference.opacity }),
+              fillOpacity: preference.fillOpacity,
+              strokeOpacity: preference.strokeOpacity,
+              ...(preference.pointIconOpacity === undefined
+                ? {}
+                : { pointIconOpacity: preference.pointIconOpacity }),
+              labelOpacity: preference.labelOpacity,
+            },
+          };
+        });
+      }
       const now = share.updatedAt;
       const sharedProject: StoredProject = {
         id: share.projectId,
