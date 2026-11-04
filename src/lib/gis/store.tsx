@@ -49,6 +49,7 @@ import { downloadSharedState, shareStore, type MapShare, type ShareRole } from "
 import { DEFAULT_BASEMAP_ID } from "./basemaps";
 import { createCoreLayerGroups, ensureCoreLayerGroups } from "./projectGroups";
 import { normalizeLayerData, normalizeLayerStyle } from "./layerNormalization";
+import { dedupePublicDataLayers } from "./displayLayers";
 
 export type DrawMode =
   | "none"
@@ -2179,10 +2180,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       toProjectState,
       layersInGroup: (groupId) => state.layers.filter((l) => l.groupId === groupId),
       activeLayer: state.layers.find((l) => l.id === state.activeLayerId) ?? null,
-      displayLayers: [
+      displayLayers: dedupePublicDataLayers([
         ...state.layers,
         ...state.subprojectOverlays.flatMap((overlay) => overlay.layers),
-      ],
+      ]),
       ...sharedCapabilities(state.accessRole, state.activeShare?.permissions),
     }),
     [
