@@ -1,6 +1,6 @@
 # LandDraft Terrain & Site Context 3D
 
-Status: optional foundation module, version 0.1.0 (2026-11-04).
+Status: optional foundation module, version 0.1.1 (2026-11-04).
 
 ## Purpose
 
@@ -20,6 +20,8 @@ certification.
 - select the current viewport or draw a two-corner rectangular study area;
 - enforce a 100 km² quick-analysis limit and a 4 km² detailed-analysis limit;
 - render an orbitable/tiltable 3D terrain surface with touch, mouse and navigation controls;
+- open at zoom level 11 around the active project location with a one-click camera reset;
+- retain an OpenStreetMap reference beneath USGS topographic or imagery surface tiles;
 - switch between a USGS topographic reference surface and attributed global imagery;
 - adjust vertical exaggeration without changing the stored numeric elevations;
 - request a bounded USGS 3DEP bare-earth numeric grid through LandDraft's existing server proxy;

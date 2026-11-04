@@ -1,6 +1,6 @@
 # Terrain & Site Context 3D
 
-Status: Ready for production release 0.9.215
+Status: Production release 0.9.216
 
 Owner branch: `codex/topography-3d-module-2026-11-04`
 
@@ -14,9 +14,13 @@ Pricing: Undecided
   service for visual topographic reference.
 - Adds an optional `/terrain-3d` workspace where a user can select the current view or draw a
   bounded rectangular study area.
+- Opens the specialist map at zoom level 11 around the active project location and provides a
+  one-click camera reset to that working zoom.
 - Provides Quick analysis up to 100 km² and Detailed analysis up to 4 km².
 - Renders an interactive orbitable terrain mesh with USGS topographic or attributed imagery
   coloring, mapped wetlands and visible project/public features.
+- Keeps OpenStreetMap beneath the selected surface and resizes the MapLibre canvas with its
+  workspace so provider or responsive-layout problems do not leave an unexplained blank map.
 - Reports bounded numeric elevation summaries from USGS 3DEP. During a numeric-service outage,
   Quick mode may use a clearly labeled approximate display-mesh sample; Detailed mode never
   substitutes that lower-assurance result.
@@ -99,5 +103,5 @@ Release verification on 2026-11-04:
   maintained source instead.
 - No setup, credential, database, billing, entitlement, production-infrastructure or backup change
   is required.
-- Rollback is application-only through the preserved `landdraft-v0.9.214` release; no database or
+- Rollback is application-only through the preserved `landdraft-v0.9.215` release; no database or
   project-state rollback is required.
