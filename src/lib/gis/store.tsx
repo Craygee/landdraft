@@ -42,6 +42,7 @@ import {
   type SaveReason,
   type StoredProject,
 } from "./project";
+import { isProjectDescendant } from "./projectHierarchy";
 import { useAuth } from "@/lib/auth";
 import { LANDDRAFT_APP_VERSION, projectVersionLabel } from "@/lib/appVersion";
 import { downloadSharedState, shareStore, type MapShare, type ShareRole } from "./sharing";
@@ -672,35 +673,44 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const hydrateSubprojectOverlays = useCallback(async (userId: string, project: StoredProject) => {
-    const enabledIds = project.state.enabledSubprojectIds ?? [];
-    const overlays = await Promise.all(
-      enabledIds.map(async (projectId) => {
-        const child = await workspaceProjectStore.load(userId, projectId);
-        if (!child || child.parentProjectId !== project.id) return null;
-        return {
-          projectId,
-          projectName: child.name,
-          layers: child.state.layers.map((layer, index) => ({
-            ...normalizedLayer(layer, index),
-            id: `subproject:${projectId}:${layer.id}`,
-            name: `${child.name} · ${layer.name}`,
-            source:
-              layer.source.kind === "derived"
-                ? {
-                    ...layer.source,
-                    sourceLayerId: `subproject:${projectId}:${layer.source.sourceLayerId}`,
-                  }
-                : layer.source,
-          })),
-        };
-      }),
-    );
-    setState((current) => ({
-      ...current,
-      subprojectOverlays: overlays.filter((item) => item !== null),
-    }));
-  }, []);
+  const hydrateSubprojectOverlays = useCallback(
+    async (userId: string, project: StoredProject, projects: ProjectSummary[]) => {
+      const enabledIds = (project.state.enabledSubprojectIds ?? []).filter((projectId) =>
+        isProjectDescendant(projectId, project.id, projects),
+      );
+      const overlays = await Promise.all(
+        enabledIds.map(async (projectId) => {
+          const child = await workspaceProjectStore.load(userId, projectId, false);
+          if (!child) return null;
+          return {
+            projectId,
+            projectName: child.name,
+            layers: child.state.layers.map((layer, index) => ({
+              ...normalizedLayer(layer, index),
+              id: `subproject:${projectId}:${layer.id}`,
+              name: `${child.name} · ${layer.name}`,
+              source:
+                layer.source.kind === "derived"
+                  ? {
+                      ...layer.source,
+                      sourceLayerId: `subproject:${projectId}:${layer.source.sourceLayerId}`,
+                    }
+                  : layer.source,
+            })),
+          };
+        }),
+      );
+      setState((current) =>
+        current.projectId === project.id
+          ? {
+              ...current,
+              subprojectOverlays: overlays.filter((item) => item !== null),
+            }
+          : current,
+      );
+    },
+    [],
+  );
 
   const addLayer = useCallback<WorkbenchApi["addLayer"]>(
     (input) => {
@@ -1670,38 +1680,73 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     async (id, enabled) => {
       const userId = auth.user?.id;
       const current = stateRef.current;
-      if (!userId) return;
+      if (!userId || !current.projectId) return;
+      if (!isProjectDescendant(id, current.projectId, current.projects))
+        throw new Error("Only a subproject of the open project can be shown on this map.");
       const enabledSubprojectIds = enabled
         ? Array.from(new Set([...current.enabledSubprojectIds, id]))
         : current.enabledSubprojectIds.filter((projectId) => projectId !== id);
+      let overlay: WorkbenchState["subprojectOverlays"][number] | null = null;
+      if (enabled) {
+        const child = await workspaceProjectStore.load(userId, id, false);
+        if (!child) throw new Error("The selected subproject could not be opened.");
+        overlay = {
+          projectId: id,
+          projectName: child.name,
+          layers: child.state.layers.map((layer, index) => ({
+            ...normalizedLayer(layer, index),
+            id: `subproject:${id}:${layer.id}`,
+            name: `${child.name} · ${layer.name}`,
+            source:
+              layer.source.kind === "derived"
+                ? {
+                    ...layer.source,
+                    sourceLayerId: `subproject:${id}:${layer.source.sourceLayerId}`,
+                  }
+                : layer.source,
+          })),
+        };
+      }
+      skipNextAutosave.current = true;
       setState((value) => ({
         ...value,
         enabledSubprojectIds,
-        subprojectOverlays: enabled
-          ? value.subprojectOverlays
-          : value.subprojectOverlays.filter((overlay) => overlay.projectId !== id),
+        subprojectOverlays:
+          enabled && overlay
+            ? [overlay, ...value.subprojectOverlays.filter((item) => item.projectId !== id)]
+            : value.subprojectOverlays.filter((item) => item.projectId !== id),
       }));
-      if (enabled) {
-        const child = await workspaceProjectStore.load(userId, id);
-        if (child) {
-          const overlay = {
-            projectId: id,
-            projectName: child.name,
-            layers: child.state.layers.map((layer, index) => ({
-              ...normalizedLayer(layer, index),
-              id: `subproject:${id}:${layer.id}`,
-              name: `${child.name} · ${layer.name}`,
-            })),
-          };
-          setState((value) => ({
-            ...value,
-            subprojectOverlays: [
-              overlay,
-              ...value.subprojectOverlays.filter((item) => item.projectId !== id),
-            ],
-          }));
-        }
+      let saved: StoredProject;
+      try {
+        saved = await workspaceProjectStore.save(
+          userId,
+          current.projectId,
+          { ...stateToProject(current), enabledSubprojectIds },
+          "manual",
+        );
+      } catch (error) {
+        setState((value) =>
+          value.projectId === current.projectId
+            ? {
+                ...value,
+                enabledSubprojectIds: current.enabledSubprojectIds,
+                subprojectOverlays: current.subprojectOverlays,
+              }
+            : value,
+        );
+        throw error;
       }
+      const projects = await workspaceProjectStore.list(userId).catch(() => current.projects);
+      setState((value) =>
+        value.projectId === current.projectId
+          ? {
+              ...value,
+              projects,
+              saveHistory: saved.versions,
+              lastSavedAt: saved.updatedAt,
+            }
+          : { ...value, projects },
+      );
     },
     [auth.user?.id],
   );
@@ -1716,7 +1761,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       skipNextAutosave.current = true;
       setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
       setShareQuery(null);
-      void hydrateSubprojectOverlays(userId, project);
+      void hydrateSubprojectOverlays(userId, project, projects);
     },
     [auth.user?.id, hydrateSubprojectOverlays, setShareQuery],
   );
@@ -1930,7 +1975,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         const refreshedProjects = await workspaceProjectStore.list(userId);
         skipNextAutosave.current = true;
         setState((current) => ({ ...current, ...normalizedProject(project, refreshedProjects) }));
-        void hydrateSubprojectOverlays(userId, project);
+        void hydrateSubprojectOverlays(userId, project, refreshedProjects);
       } catch (error) {
         setState((current) => ({
           ...current,

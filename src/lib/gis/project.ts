@@ -349,13 +349,17 @@ export const workspaceProjectStore = {
     return clone(project);
   },
 
-  async load(userId: string, projectId: string): Promise<StoredProject | null> {
+  async load(
+    userId: string,
+    projectId: string,
+    updateLastOpened = true,
+  ): Promise<StoredProject | null> {
     if (cloudConfigured) {
       const rows = await cloudDataRequest<CloudProjectRow[]>(
         `/rest/v1/projects?select=${cloudProjectSelect}&id=eq.${encodeURIComponent(projectId)}&limit=1`,
       );
       if (!rows[0]) return null;
-      await touchCloudProject(rows[0].id);
+      if (updateLastOpened) await touchCloudProject(rows[0].id);
       return storedFromCloud(rows[0]);
     }
     const projects = readProjects();
@@ -367,7 +371,7 @@ export const workspaceProjectStore = {
       projects[index] = project;
       writeProjects(projects);
     }
-    window.localStorage.setItem(lastProjectKey(userId), project.id);
+    if (updateLastOpened) window.localStorage.setItem(lastProjectKey(userId), project.id);
     return clone(project);
   },
 

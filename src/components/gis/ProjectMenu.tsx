@@ -21,6 +21,7 @@ import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth";
 import { projectVersionLabel } from "@/lib/appVersion";
+import { projectAncestorIds, projectDescendants } from "@/lib/gis/projectHierarchy";
 import { useWorkbench } from "@/lib/gis/store";
 import { cn } from "@/lib/utils";
 
@@ -45,6 +46,7 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
   );
   const childrenOf = (parentId: string) =>
     wb.projects.filter((project) => project.parentProjectId === parentId);
+  const visibleSubprojectChoices = projectDescendants(wb.projectId, wb.projects);
 
   useEffect(() => {
     const ancestors = projectAncestorIds(wb.projectId, wb.projects);
@@ -63,7 +65,7 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
   const renderProjectTree = (project: (typeof wb.projects)[number], depth = 0): React.ReactNode => {
     const children = childrenOf(project.id);
     const isSubproject = depth > 0;
-    const parentOpen = Boolean(project.parentProjectId && wb.projectId === project.parentProjectId);
+    const parentOpen = projectAncestorIds(project.id, wb.projects).includes(wb.projectId);
     const expanded = expandedProjects.has(project.id);
     return (
       <div
@@ -89,7 +91,11 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
           {...(parentOpen
             ? {
                 onToggleOverlay: (enabled: boolean) =>
-                  void wb.toggleSubprojectOverlay(project.id, enabled),
+                  void wb.toggleSubprojectOverlay(project.id, enabled).catch((error) => {
+                    toast.error("Subproject display could not be saved", {
+                      description: error instanceof Error ? error.message : "Please try again.",
+                    });
+                  }),
               }
             : {})}
           onMove={() => {
@@ -254,6 +260,57 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
             <div className="space-y-1">{roots.map((project) => renderProjectTree(project))}</div>
           </section>
 
+          {visibleSubprojectChoices.length > 0 && (
+            <section className="mt-3 rounded-xl border border-border bg-card p-3">
+              <h3 className="flex items-center gap-1.5 font-semibold">
+                <Eye className="size-3.5 text-primary" /> Subprojects shown on this map
+              </h3>
+              <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                Choose the subprojects that appear automatically whenever {wb.projectName} opens.
+                Nested subprojects can be selected independently.
+              </p>
+              <div className="mt-2 space-y-1">
+                {visibleSubprojectChoices.map(({ project, depth, path }) => {
+                  const enabled = wb.enabledSubprojectIds.includes(project.id);
+                  const pathLabel = path.map((item) => item.name).join(" / ");
+                  return (
+                    <label
+                      key={project.id}
+                      className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-accent"
+                      style={{ paddingLeft: `${Math.min(depth - 1, 5) * 12 + 8}px` }}
+                      title={pathLabel}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={enabled}
+                        onChange={(event) =>
+                          void wb
+                            .toggleSubprojectOverlay(project.id, event.target.checked)
+                            .catch((error) => {
+                              toast.error("Subproject display could not be saved", {
+                                description:
+                                  error instanceof Error ? error.message : "Please try again.",
+                              });
+                            })
+                        }
+                        className="accent-primary"
+                      />
+                      <span className="min-w-0 flex-1 truncate font-medium">{project.name}</span>
+                      {depth > 1 && (
+                        <span className="max-w-28 truncate text-[9px] text-muted-foreground">
+                          {path
+                            .slice(0, -1)
+                            .map((item) => item.name)
+                            .join(" / ")}
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           <details className="group mt-3 rounded-xl border border-border">
             <summary className="flex cursor-pointer list-none items-center gap-1 px-3 py-2.5 font-semibold">
               <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
@@ -261,8 +318,8 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
             </summary>
             <div className="space-y-2 border-t border-border p-3">
               <p className="text-[10px] leading-relaxed text-muted-foreground">
-                Create an independent area map from the project you have open. Open its parent later
-                to switch this subproject on as a live overlay.
+                Create an independent area map from the project you have open. Choose which
+                subprojects appear on the open parent map above.
               </p>
               <div className="flex gap-1">
                 <input
@@ -579,22 +636,6 @@ function ProjectRow({
       )}
     </div>
   );
-}
-
-function projectAncestorIds(
-  projectId: string,
-  projects: ReturnType<typeof useWorkbench>["projects"],
-): string[] {
-  const byId = new Map(projects.map((project) => [project.id, project]));
-  const ancestors: string[] = [];
-  const visited = new Set<string>();
-  let current = byId.get(projectId);
-  while (current?.parentProjectId && !visited.has(current.parentProjectId)) {
-    visited.add(current.parentProjectId);
-    ancestors.unshift(current.parentProjectId);
-    current = byId.get(current.parentProjectId);
-  }
-  return ancestors;
 }
 
 function TabButton({
