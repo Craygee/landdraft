@@ -1,3 +1,5 @@
+import { readSupabaseServerKey, supabaseServerHeaders } from "../_shared/serverCredentials.ts";
+
 const RESEND_EMAILS_API = "https://api.resend.com/emails";
 const DEFAULT_SITE_URL = "https://landdraft.net/";
 const DEFAULT_FROM_EMAIL = "LandDraft <accounts@notify.landdraft.net>";
@@ -138,16 +140,12 @@ const positiveInteger = (value: string | undefined, fallback: number, maximum: n
 
 // Durable daily cap on invitations per account, shared by every instance.
 const inviteAllowed = async (supabaseUrl: string, userId: string) => {
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const serviceRoleKey = readSupabaseServerKey((name) => Deno.env.get(name));
   if (!supabaseUrl || !serviceRoleKey)
     throw new Error("The LandDraft rate limit service is unavailable");
   const response = await fetch(`${supabaseUrl}/rest/v1/rpc/consume_service_rate_limit`, {
     method: "POST",
-    headers: {
-      apikey: serviceRoleKey,
-      Authorization: `Bearer ${serviceRoleKey}`,
-      "Content-Type": "application/json",
-    },
+    headers: supabaseServerHeaders(serviceRoleKey),
     body: JSON.stringify({
       p_bucket: `share-invite:user:${userId}`,
       p_limit: positiveInteger(Deno.env.get("SHARE_INVITE_DAILY_LIMIT"), 50, 1_000),

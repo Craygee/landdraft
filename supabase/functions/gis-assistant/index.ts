@@ -1,3 +1,5 @@
+import { readSupabaseServerKey, supabaseServerHeaders } from "../_shared/serverCredentials.ts";
+
 const OPENAI_RESPONSES_API = "https://api.openai.com/v1/responses";
 const GROQ_RESPONSES_API = "https://api.groq.com/openai/v1/responses";
 const NOMINATIM_API = "https://nominatim.openstreetmap.org";
@@ -142,15 +144,11 @@ const configuredProvider = (): AiProvider | null => {
 // Durable fixed-window limit shared by every Edge Function instance.
 const consumeRateLimit = async (bucket: string, limit: number, windowSeconds: number) => {
   const url = Deno.env.get("SUPABASE_URL") ?? "";
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const serviceRoleKey = readSupabaseServerKey((name) => Deno.env.get(name));
   if (!url || !serviceRoleKey) throw new Error("The LandDraft rate limit service is unavailable");
   const response = await fetch(`${url}/rest/v1/rpc/consume_service_rate_limit`, {
     method: "POST",
-    headers: {
-      apikey: serviceRoleKey,
-      Authorization: `Bearer ${serviceRoleKey}`,
-      "Content-Type": "application/json",
-    },
+    headers: supabaseServerHeaders(serviceRoleKey),
     body: JSON.stringify({ p_bucket: bucket, p_limit: limit, p_window_seconds: windowSeconds }),
   });
   if (!response.ok) throw new Error(`The LandDraft rate limit check failed (${response.status})`);
@@ -173,16 +171,12 @@ const placeSearchAllowed = async (userId: string) =>
 
 const consumeAiQuota = async (userId: string, reservedTokens: number): Promise<AiQuota> => {
   const url = Deno.env.get("SUPABASE_URL") ?? "";
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const serviceRoleKey = readSupabaseServerKey((name) => Deno.env.get(name));
   if (!url || !serviceRoleKey) throw new Error("The LandDraft AI quota service is unavailable");
 
   const response = await fetch(`${url}/rest/v1/rpc/consume_ai_daily_quota`, {
     method: "POST",
-    headers: {
-      apikey: serviceRoleKey,
-      Authorization: `Bearer ${serviceRoleKey}`,
-      "Content-Type": "application/json",
-    },
+    headers: supabaseServerHeaders(serviceRoleKey),
     body: JSON.stringify({
       p_user_id: userId,
       p_reserved_tokens: reservedTokens,
@@ -222,30 +216,22 @@ const consumeAiQuota = async (userId: string, reservedTokens: number): Promise<A
 const recordAiUsage = async (userId: string, actualTokens: number) => {
   if (!Number.isFinite(actualTokens) || actualTokens <= 0) return;
   const url = Deno.env.get("SUPABASE_URL") ?? "";
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const serviceRoleKey = readSupabaseServerKey((name) => Deno.env.get(name));
   if (!url || !serviceRoleKey) return;
   await fetch(`${url}/rest/v1/rpc/record_ai_actual_usage`, {
     method: "POST",
-    headers: {
-      apikey: serviceRoleKey,
-      Authorization: `Bearer ${serviceRoleKey}`,
-      "Content-Type": "application/json",
-    },
+    headers: supabaseServerHeaders(serviceRoleKey),
     body: JSON.stringify({ p_user_id: userId, p_actual_tokens: Math.round(actualTokens) }),
   }).catch(() => undefined);
 };
 
 const releaseAiQuota = async (userId: string, reservedTokens: number) => {
   const url = Deno.env.get("SUPABASE_URL") ?? "";
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const serviceRoleKey = readSupabaseServerKey((name) => Deno.env.get(name));
   if (!url || !serviceRoleKey) return;
   await fetch(`${url}/rest/v1/rpc/release_ai_daily_quota`, {
     method: "POST",
-    headers: {
-      apikey: serviceRoleKey,
-      Authorization: `Bearer ${serviceRoleKey}`,
-      "Content-Type": "application/json",
-    },
+    headers: supabaseServerHeaders(serviceRoleKey),
     body: JSON.stringify({ p_user_id: userId, p_reserved_tokens: reservedTokens }),
   }).catch(() => undefined);
 };

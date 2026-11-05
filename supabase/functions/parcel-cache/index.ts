@@ -1,4 +1,5 @@
 import { downloadParcels, SOURCE_URL, validateBounds } from "./model.ts";
+import { readSupabaseServerKey, supabaseServerHeaders } from "../_shared/serverCredentials.ts";
 
 // Constant-time comparison so response timing does not reveal the job secret.
 const secretMatches = (provided: string | null, expected: string) => {
@@ -20,11 +21,12 @@ Deno.serve(async (req) => {
   )
     return new Response("Unauthorized", { status: 401 });
   const url = Deno.env.get("SUPABASE_URL")!;
-  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const key = readSupabaseServerKey((name) => Deno.env.get(name));
+  if (!url || !key) return Response.json({ error: "Parcel job is unavailable." }, { status: 503 });
   const rpc = async (name: string, body: unknown) => {
     const r = await fetch(`${url}/rest/v1/rpc/${name}`, {
       method: "POST",
-      headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      headers: supabaseServerHeaders(key),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(15000),
     });
