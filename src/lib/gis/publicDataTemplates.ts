@@ -17,6 +17,27 @@ export interface PublicDataTemplate {
  */
 export const publicDataTemplates: PublicDataTemplate[] = [
   {
+    id: "study-area-report-screening",
+    name: "Study area report — national screening",
+    description:
+      "Official land cover, terrain, soils, hydrography, wetlands, flood, environmental, transportation, energy and natural-hazard context used by Study Area Report analysis.",
+    catalogIds: [
+      "usgs-annual-nlcd-land-cover",
+      "usgs-topographic-map",
+      "nrcs-ssurgo-map-units",
+      "nhd-flowlines",
+      "usgs-waterbodies",
+      "usgs-watersheds-huc12",
+      "fws-wetlands",
+      "fema-flood-zones",
+      "epa-echo-facilities",
+      "us-primary-roads-current",
+      "tx-transmission",
+      "us-power-plants-eia",
+      "fema-national-risk-index",
+    ],
+  },
+  {
     id: "texas-energy-infrastructure",
     name: "Texas energy & infrastructure",
     description:

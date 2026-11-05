@@ -25,6 +25,8 @@ import {
   svgDataUrl,
 } from "@/lib/gis/analysisArtifacts";
 import { snapshotFromLayer } from "@/lib/gis/buildableAreaModel";
+import { fetchRemoteGeoJSONPaged } from "@/lib/gis/arcgis";
+import { publicDataTemplateById } from "@/lib/gis/publicDataTemplates";
 import {
   analyzeStudyReport,
   approximateBoundsFromMapView,
@@ -100,6 +102,15 @@ export function StudyReportWorkspace() {
   const [selectedSectionId, setSelectedSectionId] =
     useState<StudyReportSectionId>("executive-summary");
   const [running, setRunning] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState("");
+  const reportTemplate = publicDataTemplateById("study-area-report-screening");
+  const connectedCatalogIds = new Set(
+    wb.displayLayers.flatMap((layer) =>
+      "catalogId" in layer.source && layer.source.catalogId ? [layer.source.catalogId] : [],
+    ),
+  );
+  const missingReportSources =
+    reportTemplate?.catalogIds.filter((id) => !connectedCatalogIds.has(id)).length ?? 0;
 
   const update = (next: StudyReportWorkspaceState) => {
     if (!wb.canEditProject) {
@@ -130,28 +141,107 @@ export function StudyReportWorkspace() {
     wb.setStudyReport(initial);
   }, [wb, polygonLayers]);
 
-  const run = () => {
+  const run = async () => {
     if (!workspace.boundary) {
       toast.error("Choose a polygon, project area or current view first.");
       return;
     }
     setRunning(true);
+    setAnalysisProgress("Preparing study boundary and active layers…");
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     try {
+      const activeLayers = wb.displayLayers.filter((layer) => layer.visible);
+      const refreshed = new Map(activeLayers.map((layer) => [layer.id, layer]));
+      const loadWarnings: string[] = [];
+      const remoteLayers = activeLayers
+        .filter(
+          (layer) =>
+            layer.source.kind === "remote" &&
+            layer.source.requiresViewport &&
+            /^https?:/i.test(layer.source.url),
+        )
+        .slice(0, 20);
+      let completed = 0;
+      for (let index = 0; index < remoteLayers.length; index += 3) {
+        const batch = remoteLayers.slice(index, index + 3);
+        await Promise.all(
+          batch.map(async (layer) => {
+            if (layer.source.kind !== "remote") return;
+            setAnalysisProgress(
+              `Loading official/project evidence ${completed + 1} of ${remoteLayers.length}: ${layer.name}`,
+            );
+            try {
+              const longitudeSpan = Math.max(
+                0.0001,
+                workspace.boundary!.bounds[2] - workspace.boundary!.bounds[0],
+              );
+              const result = await fetchRemoteGeoJSONPaged(layer.source.url, {
+                bbox: workspace.boundary!.bounds,
+                where: layer.source.where,
+                outFields: layer.source.outFields,
+                pageSize: 1_000,
+                maxTotalFeatures: 5_000,
+                maxAllowableOffset: longitudeSpan / 1_500,
+                geometryPrecision: longitudeSpan < 0.25 ? 6 : 5,
+                cacheHint: true,
+              });
+              const source = {
+                ...layer.source,
+                loading: false,
+                loadStatus: result.truncated ? ("zoom-in" as const) : ("complete" as const),
+                loadedFeatures: result.loaded,
+                ...(result.total !== undefined ? { expectedFeatures: result.total } : {}),
+                lastRefreshedAt: Date.now(),
+                ...(result.truncated
+                  ? {
+                      loadError: `Study report analyzed the first ${result.loaded.toLocaleString()} features returned for this area. Narrow the boundary for a complete inventory.`,
+                    }
+                  : {}),
+              };
+              if (!result.truncated) delete source.loadError;
+              const next = { ...layer, data: result.data, source };
+              refreshed.set(layer.id, next);
+              wb.updateDisplayLayer(layer.id, { data: result.data, source });
+              if (result.truncated)
+                loadWarnings.push(`${layer.name} reached the 5,000-feature screening limit.`);
+            } catch (error) {
+              loadWarnings.push(
+                `${layer.name}: ${error instanceof Error ? error.message : "provider request failed"}`,
+              );
+            } finally {
+              completed += 1;
+            }
+          }),
+        );
+      }
+      setAnalysisProgress("Intersecting features, clipping polygons and summarizing attributes…");
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const analysisLayers = activeLayers.map((layer) => refreshed.get(layer.id) ?? layer);
       const result = analyzeStudyReport({
         workspace,
-        layers: wb.displayLayers,
+        layers: analysisLayers,
         records: wb.records,
       });
+      if (result.currentRun && loadWarnings.length)
+        result.currentRun.warnings.push(...loadWarnings.slice(0, 12));
       update(result);
-      toast.success("Study report analysis refreshed.");
+      toast.success(
+        loadWarnings.length
+          ? `Study report refreshed with ${loadWarnings.length} provider warning${loadWarnings.length === 1 ? "" : "s"}.`
+          : "Study report analysis refreshed.",
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Report analysis failed.");
     } finally {
       setRunning(false);
+      setAnalysisProgress("");
     }
   };
 
-  const currentSignature = studyEvidenceSignature(wb.displayLayers, wb.records);
+  const currentSignature = studyEvidenceSignature(
+    wb.displayLayers.filter((layer) => layer.visible),
+    wb.records,
+  );
   const stale = Boolean(
     workspace.currentRun &&
     (workspace.currentRun.boundaryId !== workspace.boundary?.id ||
@@ -283,8 +373,8 @@ export function StudyReportWorkspace() {
         </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-auto lg:grid lg:grid-cols-[370px_minmax(0,1fr)] lg:overflow-hidden">
-        <aside className="study-report-ui border-b border-border bg-background p-3 lg:overflow-y-auto lg:border-r lg:border-b-0 lg:p-4">
+      <div className="min-h-0 flex-1 overflow-auto xl:grid xl:grid-cols-[minmax(320px,400px)_minmax(0,1fr)] xl:overflow-hidden">
+        <aside className="study-report-ui min-w-0 overflow-x-hidden border-b border-border bg-background p-3 xl:overflow-y-auto xl:border-r xl:border-b-0 xl:p-4">
           <details open className="rounded-2xl border border-border bg-card p-3">
             <summary className="cursor-pointer text-sm font-semibold">
               1. Cover & study area
@@ -296,7 +386,7 @@ export function StudyReportWorkspace() {
                   value={workspace.cover.title}
                   onChange={(event) => patchCover({ title: event.target.value })}
                   disabled={!wb.canEditProject}
-                  className="min-h-10 rounded-xl border border-border bg-background px-3 text-sm"
+                  className="min-h-10 w-full min-w-0 rounded-xl border border-border bg-background px-3 text-sm"
                 />
               </label>
               <label className="grid gap-1 text-xs font-medium">
@@ -305,7 +395,7 @@ export function StudyReportWorkspace() {
                   value={workspace.cover.subtitle}
                   onChange={(event) => patchCover({ subtitle: event.target.value })}
                   disabled={!wb.canEditProject}
-                  className="min-h-10 rounded-xl border border-border bg-background px-3 text-sm"
+                  className="min-h-10 w-full min-w-0 rounded-xl border border-border bg-background px-3 text-sm"
                 />
               </label>
               <label className="grid gap-1 text-xs font-medium">
@@ -314,11 +404,11 @@ export function StudyReportWorkspace() {
                   value={workspace.cover.company}
                   onChange={(event) => patchCover({ company: event.target.value })}
                   disabled={!wb.canEditProject}
-                  className="min-h-10 rounded-xl border border-border bg-background px-3 text-sm"
+                  className="min-h-10 w-full min-w-0 rounded-xl border border-border bg-background px-3 text-sm"
                 />
               </label>
-              <div className="flex items-center gap-2">
-                <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-border px-3 text-xs font-semibold hover:bg-accent">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <label className="flex min-h-10 min-w-0 cursor-pointer items-center gap-2 rounded-xl border border-border px-3 text-xs font-semibold hover:bg-accent">
                   <ImagePlus className="size-4" />{" "}
                   {workspace.cover.logoDataUrl ? "Replace logo" : "Add logo"}
                   <input
@@ -349,7 +439,7 @@ export function StudyReportWorkspace() {
                   value={sourceSelection(workspace)}
                   onChange={(event) => changeBoundary(event.target.value)}
                   disabled={!wb.canEditProject}
-                  className="min-h-10 rounded-xl border border-border bg-background px-3 text-sm"
+                  className="min-h-10 w-full min-w-0 rounded-xl border border-border bg-background px-3 text-sm"
                 >
                   <option value="current-view">Current map view</option>
                   <option value="project-area" disabled={!wb.projectArea?.bounds}>
@@ -373,9 +463,33 @@ export function StudyReportWorkspace() {
               ) : null}
               <button
                 type="button"
-                onClick={run}
+                onClick={() => {
+                  const summary = wb.applyPublicDataTemplate("study-area-report-screening");
+                  if (!summary.added && !summary.shown) {
+                    toast.info(
+                      "The official study-report layers are already connected and visible.",
+                    );
+                    return;
+                  }
+                  toast.success(
+                    `${summary.added} official layer${summary.added === 1 ? "" : "s"} added; ${summary.shown} existing layer${summary.shown === 1 ? "" : "s"} turned on.`,
+                  );
+                }}
+                disabled={running || !wb.canEditProject}
+                className="flex min-h-11 w-full min-w-0 items-center justify-center gap-2 rounded-xl border border-primary/35 bg-primary/5 px-3 text-center text-sm font-semibold whitespace-normal text-primary hover:bg-primary/10 disabled:opacity-50"
+              >
+                <Check className="size-4 shrink-0" />
+                <span>
+                  {missingReportSources
+                    ? `Add ${missingReportSources} recommended official report layer${missingReportSources === 1 ? "" : "s"}`
+                    : "Turn on official report layers"}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => void run()}
                 disabled={running || !wb.canEditProject || !workspace.boundary}
-                className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                className="flex min-h-11 w-full min-w-0 items-center justify-center gap-2 rounded-xl bg-primary px-3 text-center text-sm font-semibold whitespace-normal text-primary-foreground disabled:opacity-50"
               >
                 {running ? (
                   <Loader2 className="size-4 animate-spin" />
@@ -386,9 +500,15 @@ export function StudyReportWorkspace() {
                 )}
                 {workspace.currentRun ? "Re-run analysis" : "Run analysis"}
               </button>
+              {running && analysisProgress ? (
+                <p className="rounded-xl border border-primary/20 bg-primary/5 p-2 text-[11px] leading-4 text-primary">
+                  {analysisProgress}
+                </p>
+              ) : null}
               <p className="text-[11px] leading-4 text-muted-foreground">
-                This foundation analyzes loaded project evidence. Provider-backed acquisition and
-                deeper source-specific calculations are staged for the next integration phase.
+                Analysis refreshes active viewport services for the exact study boundary, tests
+                spatial intersections, clips mapped polygon coverage, summarizes useful attributes
+                and regenerates section-specific maps. Provider limits and failures stay visible.
               </p>
             </div>
           </details>
@@ -465,7 +585,7 @@ export function StudyReportWorkspace() {
                       patchSection(selectedConfig.id, { title: event.target.value })
                     }
                     disabled={!wb.canEditProject}
-                    className="min-h-10 rounded-xl border border-border bg-background px-3 text-sm"
+                    className="min-h-10 w-full min-w-0 rounded-xl border border-border bg-background px-3 text-sm"
                   />
                 </label>
                 <label className="grid gap-1 text-xs font-medium">
@@ -478,7 +598,7 @@ export function StudyReportWorkspace() {
                     disabled={!wb.canEditProject}
                     rows={7}
                     placeholder="Add reviewed findings, assumptions, field observations or a response to an insufficient-data item. This text is preserved when analysis is re-run."
-                    className="resize-y rounded-xl border border-border bg-background p-3 text-sm"
+                    className="w-full min-w-0 resize-y rounded-xl border border-border bg-background p-3 text-sm"
                   />
                 </label>
                 <label className="flex items-start gap-2 rounded-xl border border-border bg-background p-3 text-xs">
@@ -506,7 +626,7 @@ export function StudyReportWorkspace() {
           ) : null}
         </aside>
 
-        <main className="min-h-0 overflow-y-auto p-2 sm:p-5 lg:p-8">
+        <main className="min-h-0 min-w-0 overflow-y-auto p-2 sm:p-5 xl:p-8">
           {stale ? (
             <div className="study-report-ui mx-auto mb-3 flex max-w-[8.5in] items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
               <TriangleAlert className="mt-0.5 size-4 shrink-0" />
@@ -667,7 +787,7 @@ function ReportSectionPage({
 }) {
   const result = workspace.currentRun?.sections.find((section) => section.id === config.id);
   if (!result) return null;
-  const mappedLayers = result.layerIds.flatMap((id) => {
+  const mappedLayers = (result.mapLayerIds ?? result.layerIds).flatMap((id) => {
     const layer = layers.find((candidate) => candidate.id === id);
     return layer ? [layer] : [];
   });
@@ -676,8 +796,19 @@ function ReportSectionPage({
   const buildable = buildableLayer ? snapshotFromLayer(buildableLayer) : null;
   const showMap = Boolean(
     workspace.boundary &&
-    result.layerIds.length &&
-    !["project-records", "sources", "data-gaps"].includes(config.id),
+    (mappedLayers.length || config.id === "study-area") &&
+    [
+      "study-area",
+      "land-cover",
+      "terrain",
+      "hydrology",
+      "soils",
+      "site-suitability",
+      "environmental",
+      "infrastructure",
+      "energy",
+      "hazards",
+    ].includes(config.id),
   );
   return (
     <article className="study-report-page min-h-[11in] bg-white p-[0.55in] shadow-xl">
@@ -751,6 +882,68 @@ function ReportSectionPage({
               ) : null}
             </div>
           ))}
+        </div>
+      ) : null}
+      {result.analysis?.layers.length ? (
+        <div className="mt-5 overflow-hidden rounded-xl border border-[#dce2d9]">
+          <div className="bg-[#edf2eb] px-3 py-2">
+            <strong className="text-[10px] tracking-wide text-[#405448] uppercase">
+              Evidence analyzed inside the boundary
+            </strong>
+            <p className="mt-1 text-[9px] leading-4 text-[#59675e]">{result.analysis.method}</p>
+          </div>
+          <table className="w-full border-collapse text-left text-[9px]">
+            <thead className="bg-[#f7f8f4] text-[#526157]">
+              <tr>
+                <th className="p-2">Layer</th>
+                <th className="p-2 text-right">Features</th>
+                <th className="p-2">Geometry / coverage</th>
+                <th className="p-2">Leading attributes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.analysis.layers.slice(0, 12).map((layer) => (
+                <tr key={layer.layerId} className="border-t border-[#dce2d9] align-top">
+                  <td className="p-2 font-semibold text-[#24392b]">{layer.name}</td>
+                  <td className="p-2 text-right">{layer.featureCount.toLocaleString()}</td>
+                  <td className="p-2 text-[#526157]">
+                    {[
+                      layer.pointCount ? `${layer.pointCount} point` : "",
+                      layer.lineCount ? `${layer.lineCount} line` : "",
+                      layer.polygonCount ? `${layer.polygonCount} polygon` : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                    {layer.mappedCoverageAcres !== undefined ? (
+                      <span className="block">
+                        {layer.mappedCoverageAcres.toLocaleString("en-US", {
+                          maximumFractionDigits: 1,
+                        })}{" "}
+                        acres (
+                        {(layer.mappedCoveragePercent ?? 0).toLocaleString("en-US", {
+                          maximumFractionDigits: 1,
+                        })}
+                        %)
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="max-w-[2.4in] p-2 text-[#526157]">
+                    {layer.attributes.length
+                      ? layer.attributes
+                          .map(
+                            (attribute) =>
+                              `${attribute.field}: ${attribute.values
+                                .slice(0, 3)
+                                .map((value) => `${value.value} (${value.count})`)
+                                .join(", ")}`,
+                          )
+                          .join("; ")
+                      : "No concise categorical attribute summary"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ) : null}
       {showMap && workspace.boundary ? (

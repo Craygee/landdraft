@@ -14,7 +14,7 @@ LandDraft's implementation uses three evidence states:
 
 ## Public-data candidates
 
-These are candidate evidence providers, not a promise that every product is already connected. Each integration must retain source, valid/retrieval time where relevant, coverage, limitations and attribution.
+These are evidence providers reviewed for the report workflow. “Connected” means LandDraft ships a usable catalog connection; other rows remain documented candidates. Each integration retains source, coverage, limitations and attribution.
 
 | Topic                                | Preferred public source                                                                   | Use                                                             | Important limitation                                                                        | Access/cost                                                      |
 | ------------------------------------ | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -22,13 +22,14 @@ These are candidate evidence providers, not a promise that every product is alre
 | Surface water and watersheds         | USGS 3D Hydrography Program, NHDPlus HR and Watershed Boundary Dataset                    | streams, waterbodies, drainage context and watersheds           | legacy NHD is retired from maintenance; prefer current 3DHP/NHDPlus products when available | public map/download services                                     |
 | Wetlands                             | U.S. Fish & Wildlife Service National Wetlands Inventory                                  | mapped wetland and riparian context                             | inventory mapping is not a jurisdictional wetland determination                             | public REST/WMS/download                                         |
 | Flood hazards                        | FEMA National Flood Hazard Layer                                                          | effective flood-hazard context and mapped zones                 | coverage and map effective dates vary; not a substitute for a site-specific flood study     | public GIS services                                              |
-| Soils                                | USDA-NRCS SSURGO / Soil Data Access / Web Soil Survey                                     | soil map units and interpretations for planning                 | scale, map-unit composition and NOTCOM gaps require careful reporting                       | public; Web Soil Survey is the official current source           |
-| Land cover                           | Multi-Resolution Land Characteristics Consortium Annual NLCD                              | land-cover and impervious-surface context                       | modeled classification; publication year and confidence matter                              | public WMS/WCS/download                                          |
+| Soils                                | USDA-NRCS SSURGO / `cg_soils` FeatureServer                                               | connected national map-unit polygons and planning attributes    | scale, map-unit composition and NOTCOM gaps require careful reporting                       | public FeatureServer; connected                                  |
+| Land cover                           | USGS/MRLC Annual NLCD                                                                     | connected 2025 land-cover map context                           | modeled 30 m classification; CONUS coverage; not parcel-scale verification                  | public WMS; connected                                            |
 | Environmental facilities             | EPA Facility Registry Service, Envirofacts and ECHO                                       | facility and regulated-program context                          | a listed facility is not proof of contamination or liability                                | public APIs, services and downloads                              |
 | Boundaries, roads and hydrography    | U.S. Census Bureau TIGER/Line and TIGERweb                                                | administrative context, roads and selected physical features    | not a parcel or engineering road survey                                                     | public downloads and REST/WMS                                    |
 | Energy infrastructure and statistics | U.S. Energy Information Administration Energy Atlas and Open Data                         | energy context, plants, systems and time-series statistics      | product coverage and update cadence vary; some APIs require a free key                      | public; API registration may be required                         |
 | Solar resource                       | National Renewable Energy Laboratory solar resource datasets / NSRDB                      | regional solar-resource context                                 | resource potential is not a project yield or feasibility guarantee                          | public maps/downloads; some services require keys or have quotas |
 | Weather and climate                  | NOAA/NCEI Climate Normals and web services                                                | climate context and long-term normals                           | normals are not a site-specific forecast                                                    | public; some APIs require a token                                |
+| Natural-hazard screening             | FEMA National Risk Index Census Tracts                                                    | connected composite and 18-hazard screening context             | census-tract planning index; not a parcel-specific probability or regulatory determination  | public FeatureServer; connected                                  |
 
 ## Official references
 
@@ -41,6 +42,10 @@ These are candidate evidence providers, not a promise that every product is alre
 - EPA FRS data options: https://www.epa.gov/frs/frs-data-download-options
 - Census TIGER data guide: https://www.census.gov/programs-surveys/geography/guidance/tiger-data-products-guide.html
 - MRLC data services: https://www.mrlc.gov/data-services-page
+- USGS Annual NLCD access: https://www.usgs.gov/centers/eros/science/annual-nlcd-data-access
+- NRCS national SSURGO FeatureServer: https://apps.geo.fpac.usda.gov/nrcs-geodata/rest/services/soils/cg_soils/FeatureServer/0
+- FEMA National Risk Index: https://www.fema.gov/flood-maps/products-tools/national-risk-index
+- FEMA National Risk Index FeatureServer: https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Census_Tracts/FeatureServer/0
 - EIA Energy Atlas: https://atlas.eia.gov/
 - NOAA/NCEI web services: https://www.ncei.noaa.gov/cdo-web/webservices
 - NREL solar resource maps: https://www.nrel.gov/gis/solar-resource-maps
@@ -54,7 +59,7 @@ These are candidate evidence providers, not a promise that every product is alre
 5. Use warnings appropriate to the source: screening, inventory, modeled estimate or official designation.
 6. Permit a user to edit narrative without rewriting the underlying observed evidence.
 7. Re-running analysis updates generated content but retains user-authored additions.
-8. The first increment analyzes data already loaded into LandDraft. Server-side, viewport-specific provider acquisition is a later phase and must use provider-specific validation, caching and cost controls.
+8. The report now refreshes active viewport services directly for the selected boundary with a 5,000-feature-per-layer screening cap. Provider failures and truncation remain visible; high-volume server-side acquisition is still a later phase.
 
 ## Dependencies and potential operating costs
 

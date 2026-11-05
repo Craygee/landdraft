@@ -82,6 +82,25 @@ test("keeps the retired USGS contour source reconnectable without shipping it to
   );
 });
 
+test("ships verified national study-report layers for land cover, soils and hazards", () => {
+  const landCover = catalog.find((entry) => entry.id === "usgs-annual-nlcd-land-cover");
+  const soils = catalog.find((entry) => entry.id === "nrcs-ssurgo-map-units");
+  const hazards = catalog.find((entry) => entry.id === "fema-national-risk-index");
+
+  assert.equal(landCover?.agency, "U.S. Geological Survey / MRLC Consortium");
+  assert.equal(landCover?.rendering, "raster-tiles");
+  assert.match(landCover?.url ?? "", /mrlc_Land-Cover-Native_conus_year_data\/wms/);
+  assert.match(landCover?.url ?? "", /bbox=\{bbox-epsg-3857\}/);
+
+  assert.equal(soils?.agency, "USDA Natural Resources Conservation Service");
+  assert.equal(soils?.requiresViewport, true);
+  assert.match(soils?.url ?? "", /nrcs-geodata.*cg_soils\/FeatureServer\/0$/);
+
+  assert.equal(hazards?.agency, "Federal Emergency Management Agency");
+  assert.equal(hazards?.requiresViewport, true);
+  assert.match(hazards?.url ?? "", /National_Risk_Index_Census_Tracts\/FeatureServer\/0$/);
+});
+
 test("ships live power, peaker-screen and Texas gas-plant layers with explicit provenance", () => {
   const power = catalog.find((entry) => entry.id === "us-power-plants-eia");
   const peakers = catalog.find((entry) => entry.id === "us-peaker-plant-candidates-eia");

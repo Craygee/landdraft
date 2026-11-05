@@ -74,6 +74,35 @@ export interface StudyReportSourceRecommendation {
   note: string;
 }
 
+export interface StudyReportAttributeSummary {
+  field: string;
+  values: Array<{ value: string; count: number }>;
+}
+
+export interface StudyReportLayerAnalysis {
+  layerId: string;
+  name: string;
+  featureCount: number;
+  pointCount: number;
+  lineCount: number;
+  polygonCount: number;
+  mappedCoverageAcres?: number;
+  mappedCoveragePercent?: number;
+  attributes: StudyReportAttributeSummary[];
+  note?: string;
+}
+
+export interface StudyReportSectionAnalysis {
+  method: string;
+  intersectingFeatures: number;
+  pointCount: number;
+  lineCount: number;
+  polygonCount: number;
+  mappedCoverageAcres?: number;
+  mappedCoveragePercent?: number;
+  layers: StudyReportLayerAnalysis[];
+}
+
 export interface StudyReportSectionResult {
   id: StudyReportSectionId;
   title: string;
@@ -81,6 +110,9 @@ export interface StudyReportSectionResult {
   generatedNarrative: string;
   metrics: StudyReportMetric[];
   layerIds: string[];
+  /** Layers with evidence that should actually appear on this section's report map. */
+  mapLayerIds?: string[];
+  analysis?: StudyReportSectionAnalysis;
   sources: StudyReportSourceReference[];
   recommendations?: StudyReportSourceRecommendation[];
   gapMessage?: string;

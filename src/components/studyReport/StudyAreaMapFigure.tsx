@@ -1,5 +1,6 @@
-import { useMemo, type ReactNode } from "react";
-import type { Geometry, Position } from "geojson";
+import { booleanIntersects } from "@turf/turf";
+import { useId, useMemo, type ReactNode } from "react";
+import type { Feature, Geometry, Position } from "geojson";
 import type { GisLayer } from "@/lib/gis/types";
 import type { StudyReportBoundary } from "@/lib/studyReport/types";
 
@@ -122,6 +123,44 @@ function geometryElements(
   return [];
 }
 
+function intersectsStudyArea(feature: Feature, boundary: StudyReportBoundary) {
+  if (!feature.geometry) return false;
+  try {
+    return boundary.data.features.some((polygon) => booleanIntersects(feature, polygon));
+  } catch {
+    return false;
+  }
+}
+
+function geometryOrder(geometry: Geometry) {
+  if (geometry.type.includes("Polygon")) return 0;
+  if (geometry.type.includes("LineString")) return 1;
+  if (geometry.type.includes("Point")) return 2;
+  return 3;
+}
+
+function toWebMercator([longitude, latitude]: [number, number]): [number, number] {
+  const limitedLatitude = Math.max(-85.05112878, Math.min(85.05112878, latitude));
+  const x = (longitude * 20037508.342789244) / 180;
+  const y =
+    (Math.log(Math.tan(((90 + limitedLatitude) * Math.PI) / 360)) / (Math.PI / 180)) *
+    (20037508.342789244 / 180);
+  return [x, y];
+}
+
+function rasterImageUrl(layer: GisLayer, bounds: StudyReportBoundary["bounds"]) {
+  if (layer.source.kind !== "raster") return null;
+  const template = layer.source.tiles[0];
+  if (!template?.includes("{bbox-epsg-3857}")) return null;
+  const [west, south, east, north] = bounds;
+  const [minX, minY] = toWebMercator([west, south]);
+  const [maxX, maxY] = toWebMercator([east, north]);
+  return template
+    .replace("{bbox-epsg-3857}", `${minX},${minY},${maxX},${maxY}`)
+    .replace(/([?&])width=256(?=&|$)/i, `$1width=${WIDTH}`)
+    .replace(/([?&])height=256(?=&|$)/i, `$1height=${HEIGHT}`);
+}
+
 export function StudyAreaMapFigure({
   title,
   boundary,
@@ -131,16 +170,29 @@ export function StudyAreaMapFigure({
   boundary: StudyReportBoundary;
   layers: GisLayer[];
 }) {
+  const clipId = `study-boundary-${useId().replace(/:/g, "")}`;
   const project = useMemo(() => projector(boundary.bounds), [boundary.bounds]);
-  const visible = layers.slice(0, 12);
-  const geometry = visible.flatMap((layer) =>
-    layer.data.features
-      .slice(0, 800)
-      .flatMap((feature, featureIndex) =>
-        feature.geometry
-          ? geometryElements(feature.geometry, project, layer.style, `${layer.id}-${featureIndex}`)
-          : [],
-      ),
+  const visible = layers.slice(0, 8);
+  const rasterImages = visible.flatMap((layer) => {
+    const url = rasterImageUrl(layer, boundary.bounds);
+    return url ? [{ layer, url }] : [];
+  });
+  const intersecting = visible
+    .flatMap((layer) =>
+      layer.data.features
+        .filter((feature) => intersectsStudyArea(feature, boundary))
+        .map((feature, index) => ({ layer, feature, index })),
+    )
+    .sort((a, b) =>
+      a.feature.geometry && b.feature.geometry
+        ? geometryOrder(a.feature.geometry) - geometryOrder(b.feature.geometry)
+        : 0,
+    )
+    .slice(0, 650);
+  const geometry = intersecting.flatMap(({ layer, feature, index }) =>
+    feature.geometry
+      ? geometryElements(feature.geometry, project, layer.style, `${layer.id}-${index}`)
+      : [],
   );
   const boundaryPaths = boundary.data.features.map((feature) =>
     feature.geometry.type === "Polygon"
@@ -159,8 +211,10 @@ export function StudyAreaMapFigure({
           <pattern id="study-grid" width="38" height="38" patternUnits="userSpaceOnUse">
             <path d="M 38 0 L 0 0 0 38" fill="none" stroke="#dfe4da" strokeWidth="1" />
           </pattern>
-          <clipPath id="study-map-clip">
-            <rect x={PAD} y={PAD} width={WIDTH - PAD * 2} height={HEIGHT - PAD * 2} rx="4" />
+          <clipPath id={clipId}>
+            {boundaryPaths.map((path, index) => (
+              <path key={`clip-${index}`} d={path} fillRule="evenodd" />
+            ))}
           </clipPath>
         </defs>
         <rect width={WIDTH} height={HEIGHT} fill="#f8f6ef" />
@@ -171,7 +225,7 @@ export function StudyAreaMapFigure({
           height={HEIGHT - PAD * 2}
           fill="url(#study-grid)"
         />
-        <g clipPath="url(#study-map-clip)">
+        <g clipPath={`url(#${clipId})`}>
           {boundaryPaths.map((path, index) => (
             <path
               key={`boundary-${index}`}
@@ -181,6 +235,18 @@ export function StudyAreaMapFigure({
               fillRule="evenodd"
               stroke="#176d3e"
               strokeWidth="3"
+            />
+          ))}
+          {rasterImages.map(({ layer, url }) => (
+            <image
+              key={`raster-${layer.id}`}
+              href={url}
+              x={PAD}
+              y={PAD}
+              width={WIDTH - PAD * 2}
+              height={HEIGHT - PAD * 2}
+              preserveAspectRatio="none"
+              opacity={Math.min(0.9, Math.max(0.15, layer.style.opacity ?? 0.8))}
             />
           ))}
           {geometry}
@@ -210,12 +276,13 @@ export function StudyAreaMapFigure({
       </svg>
       <figcaption className="border-t border-[#d9dfd6] px-3 py-2 text-[11px] leading-4 text-[#526157]">
         <strong className="text-[#1e3426]">{title}.</strong> Study boundary: {boundary.name}.
-        Showing up to 12 vector layers and 800 features per layer for report legibility. This
-        schematic figure does not replace source-specific maps or field verification.
+        Showing only section-specific evidence intersecting the study area (up to 8 layers and 650
+        vector features), clipped to the selected boundary. This screening figure does not replace
+        source-specific maps or field verification.
       </figcaption>
       {visible.length ? (
         <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pb-3 text-[10px] text-[#526157]">
-          {visible.slice(0, 6).map((layer) => (
+          {visible.map((layer) => (
             <span key={layer.id} className="inline-flex items-center gap-1">
               <i
                 className="inline-block size-2 rounded-full border"

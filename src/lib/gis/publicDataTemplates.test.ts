@@ -26,6 +26,18 @@ test("every shipped template references ready-to-load catalog services", () => {
   }
 });
 
+test("study area report template spans the core evidence categories", () => {
+  const entries = publicDataTemplateEntries("study-area-report-screening");
+  const ids = new Set(entries.map((entry) => entry.id));
+
+  assert.ok(ids.has("usgs-annual-nlcd-land-cover"));
+  assert.ok(ids.has("nrcs-ssurgo-map-units"));
+  assert.ok(ids.has("fema-flood-zones"));
+  assert.ok(ids.has("fema-national-risk-index"));
+  assert.ok(ids.has("us-primary-roads-current"));
+  assert.ok(ids.has("us-power-plants-eia"));
+});
+
 test("applying a template adds visible layers without duplicating catalog sources", () => {
   const first = applyPublicDataTemplateLayers([], "national-energy-development", 100);
   assert.equal(first.added, 5);

@@ -119,7 +119,23 @@ test("classifies mapped evidence and preserves missing categories as insufficien
   });
   const result = analyzeStudyReport({
     workspace,
-    layers: [hydrology],
+    layers: [
+      hydrology,
+      layer({
+        id: "outside-stream",
+        name: "Hydrology outside study area",
+        data: {
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              properties: { type: "stream" },
+              geometry: { type: "Point", coordinates: [-110, 40] },
+            },
+          ],
+        },
+      }),
+    ],
     records: emptyProjectRecords(),
     analyzedAt: "2026-11-04T12:00:00.000Z",
   });
@@ -127,6 +143,8 @@ test("classifies mapped evidence and preserves missing categories as insufficien
   const soils = result.currentRun?.sections.find((section) => section.id === "soils");
   assert.equal(water?.status, "ready");
   assert.equal(water?.metrics.find((metric) => metric.id === "features")?.value, "1");
+  assert.deepEqual(water?.mapLayerIds, ["wetlands"]);
+  assert.equal(water?.analysis?.layers[0]?.attributes[0]?.field, "type");
   assert.equal(water?.sources[0]?.attribution, "U.S. Fish and Wildlife Service");
   assert.equal(soils?.status, "insufficient");
   assert.match(soils?.gapMessage ?? "", /Add an appropriate public or user layer/);
@@ -136,6 +154,46 @@ test("classifies mapped evidence and preserves missing categories as insufficien
       .find((section) => section.id === "data-gaps")
       ?.generatedNarrative.includes("Soils & Subsurface Context"),
   );
+});
+
+test("clips polygon coverage to the study boundary and avoids double-counting overlap", () => {
+  const workspace = createStudyReportWorkspace("Coverage Study");
+  workspace.boundary = studyBoundaryFromBounds(
+    "Project area",
+    "project-area",
+    [-100, 32, -99.9, 32.1],
+  );
+  const repeatedPolygon = {
+    type: "Feature" as const,
+    properties: { CLASS: "Freshwater wetland" },
+    geometry: {
+      type: "Polygon" as const,
+      coordinates: [
+        [
+          [-100.05, 31.95],
+          [-99.95, 31.95],
+          [-99.95, 32.05],
+          [-100.05, 32.05],
+          [-100.05, 31.95],
+        ],
+      ],
+    },
+  };
+  const result = analyzeStudyReport({
+    workspace,
+    layers: [
+      layer({
+        id: "wetland-polygons",
+        name: "Wetland polygons",
+        data: { type: "FeatureCollection", features: [repeatedPolygon, repeatedPolygon] },
+      }),
+    ],
+    records: emptyProjectRecords(),
+  });
+  const water = result.currentRun?.sections.find((section) => section.id === "hydrology");
+  assert.equal(water?.analysis?.polygonCount, 2);
+  assert.ok((water?.analysis?.mappedCoveragePercent ?? 0) > 20);
+  assert.ok((water?.analysis?.mappedCoveragePercent ?? 101) < 60);
 });
 
 test("reruns generated analysis without replacing user narrative", () => {

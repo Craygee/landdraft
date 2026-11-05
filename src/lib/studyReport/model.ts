@@ -1,10 +1,19 @@
-import { area, bbox, bboxPolygon, booleanIntersects, featureCollection } from "@turf/turf";
+import {
+  area,
+  bbox,
+  bboxPolygon,
+  booleanIntersects,
+  featureCollection,
+  intersect,
+  union,
+} from "@turf/turf";
 import type { Feature, MultiPolygon, Polygon } from "geojson";
 import type { GisLayer, MapViewState, ProjectRecords } from "../gis/types.ts";
 import type {
   StudyReportBoundary,
   StudyReportCapability,
   StudyReportSectionConfig,
+  StudyReportSectionAnalysis,
   StudyReportSectionId,
   StudyReportSectionResult,
   StudyReportSourceRecommendation,
@@ -414,20 +423,167 @@ function intersectsBoundary(feature: Feature, boundary: StudyReportBoundary): bo
 function layerEvidence(
   layers: GisLayer[],
   boundary: StudyReportBoundary,
-): { features: number; layersWithFeatures: number; nonVectorLayers: number } {
+): {
+  features: number;
+  layersWithFeatures: number;
+  nonVectorLayers: number;
+  mapLayerIds: string[];
+  analysis: StudyReportSectionAnalysis;
+} {
   let features = 0;
   let layersWithFeatures = 0;
   let nonVectorLayers = 0;
+  let pointCount = 0;
+  let lineCount = 0;
+  let polygonCount = 0;
+  const layerAnalyses: StudyReportSectionAnalysis["layers"] = [];
+  const clippedPolygons: Feature<Polygon | MultiPolygon>[] = [];
+
+  const geometryFamily = (feature: Feature) => {
+    const type = feature.geometry?.type ?? "";
+    if (type.includes("Point")) return "point" as const;
+    if (type.includes("LineString")) return "line" as const;
+    if (type.includes("Polygon")) return "polygon" as const;
+    return "other" as const;
+  };
+
+  const attributeSummaries = (intersecting: Feature[]) => {
+    const ignored = /^(objectid|fid|shape|shape__area|shape__length|globalid)$/i;
+    const fields = new Map<string, Map<string, number>>();
+    for (const feature of intersecting.slice(0, 2_000)) {
+      for (const [field, raw] of Object.entries(feature.properties ?? {})) {
+        if (ignored.test(field) || raw === null || raw === undefined || typeof raw === "object")
+          continue;
+        const value = String(raw).trim();
+        if (!value || value.length > 80) continue;
+        const counts = fields.get(field) ?? new Map<string, number>();
+        counts.set(value, (counts.get(value) ?? 0) + 1);
+        fields.set(field, counts);
+      }
+    }
+    return [...fields.entries()]
+      .map(([field, counts]) => ({
+        field,
+        values: [...counts.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .slice(0, 4)
+          .map(([value, count]) => ({ value, count })),
+      }))
+      .sort((a, b) => {
+        const aCount = a.values.reduce((total, item) => total + item.count, 0);
+        const bCount = b.values.reduce((total, item) => total + item.count, 0);
+        return bCount - aCount || a.field.localeCompare(b.field);
+      })
+      .slice(0, 3);
+  };
+
   for (const layer of layers) {
-    const count = layer.data.features.filter((feature) =>
+    const intersecting = layer.data.features.filter((feature) =>
       intersectsBoundary(feature, boundary),
-    ).length;
+    );
+    const count = intersecting.length;
     features += count;
-    if (count) layersWithFeatures += 1;
+    if (count) {
+      layersWithFeatures += 1;
+      const counts = { point: 0, line: 0, polygon: 0 };
+      const layerClipped: Feature<Polygon | MultiPolygon>[] = [];
+      for (const feature of intersecting) {
+        const family = geometryFamily(feature);
+        if (family !== "other") counts[family] += 1;
+        if (family !== "polygon" || !feature.geometry) continue;
+        try {
+          for (const boundaryFeature of boundary.data.features) {
+            const clipped = intersect(
+              featureCollection([feature as Feature<Polygon | MultiPolygon>, boundaryFeature]),
+            );
+            if (clipped) {
+              layerClipped.push(clipped as Feature<Polygon | MultiPolygon>);
+              clippedPolygons.push(clipped as Feature<Polygon | MultiPolygon>);
+            }
+          }
+        } catch {
+          // Invalid provider geometry remains counted but is not used for coverage calculations.
+        }
+      }
+      pointCount += counts.point;
+      lineCount += counts.line;
+      polygonCount += counts.polygon;
+      let mappedCoverageAcres: number | undefined;
+      if (layerClipped.length && layerClipped.length <= 350) {
+        try {
+          const combined =
+            layerClipped.length === 1
+              ? layerClipped[0]!
+              : (union(featureCollection(layerClipped)) as Feature<Polygon | MultiPolygon> | null);
+          if (combined) mappedCoverageAcres = area(combined) / ACRE_SQUARE_METERS;
+        } catch {
+          // Overlapping or invalid polygons are left without a coverage claim.
+        }
+      }
+      layerAnalyses.push({
+        layerId: layer.id,
+        name: layer.name,
+        featureCount: count,
+        pointCount: counts.point,
+        lineCount: counts.line,
+        polygonCount: counts.polygon,
+        ...(mappedCoverageAcres !== undefined
+          ? {
+              mappedCoverageAcres,
+              mappedCoveragePercent: Math.min(
+                100,
+                (mappedCoverageAcres / Math.max(boundary.areaAcres, 0.0001)) * 100,
+              ),
+            }
+          : {}),
+        attributes: attributeSummaries(intersecting),
+        ...(layerClipped.length > 350
+          ? {
+              note: "Polygon coverage was not calculated because this layer exceeded the report geometry limit.",
+            }
+          : {}),
+      });
+    }
     if (!layer.data.features.length && ["raster", "remote"].includes(layer.source.kind))
       nonVectorLayers += 1;
   }
-  return { features, layersWithFeatures, nonVectorLayers };
+
+  let mappedCoverageAcres: number | undefined;
+  if (clippedPolygons.length && clippedPolygons.length <= 500) {
+    try {
+      const combined =
+        clippedPolygons.length === 1
+          ? clippedPolygons[0]!
+          : (union(featureCollection(clippedPolygons)) as Feature<Polygon | MultiPolygon> | null);
+      if (combined) mappedCoverageAcres = area(combined) / ACRE_SQUARE_METERS;
+    } catch {
+      // Section totals remain available even when source polygons cannot be unioned safely.
+    }
+  }
+  return {
+    features,
+    layersWithFeatures,
+    nonVectorLayers,
+    mapLayerIds: layerAnalyses.map((layer) => layer.layerId),
+    analysis: {
+      method:
+        "Vector features were spatially intersected with the selected study boundary. Polygon coverage was clipped and unioned where geometry volume and validity allowed.",
+      intersectingFeatures: features,
+      pointCount,
+      lineCount,
+      polygonCount,
+      ...(mappedCoverageAcres !== undefined
+        ? {
+            mappedCoverageAcres,
+            mappedCoveragePercent: Math.min(
+              100,
+              (mappedCoverageAcres / Math.max(boundary.areaAcres, 0.0001)) * 100,
+            ),
+          }
+        : {}),
+      layers: layerAnalyses,
+    },
+  };
 }
 
 const number = (value: number, maximumFractionDigits = 0) =>
@@ -444,7 +600,12 @@ function resultForLayerSection(
   const status = !candidates.length ? "insufficient" : evidence.features > 0 ? "ready" : "partial";
   const generatedNarrative =
     status === "ready"
-      ? `LandDraft found ${number(evidence.features)} mapped feature${evidence.features === 1 ? "" : "s"} from ${number(candidates.length)} relevant loaded layer${candidates.length === 1 ? "" : "s"} within or crossing the study area. Review the mapped evidence, source dates and attributes before relying on it for site decisions.`
+      ? `LandDraft spatially analyzed ${number(evidence.features)} mapped feature${evidence.features === 1 ? "" : "s"} from ${number(evidence.layersWithFeatures)} intersecting layer${evidence.layersWithFeatures === 1 ? "" : "s"}: ${evidence.analysis.layers
+          .slice(0, 4)
+          .map((layer) => layer.name)
+          .join(
+            ", ",
+          )}${evidence.analysis.layers.length > 4 ? ", and additional sources" : ""}. Features outside the selected boundary were excluded from this section map. Review source dates, attributes, calculated coverage and provider warnings before relying on the screening result.`
       : status === "partial"
         ? `${number(candidates.length)} potentially relevant layer${candidates.length === 1 ? " is" : "s are"} available, but no locally loaded vector feature was confirmed inside the study boundary. Raster or viewport-dependent context may still be visually useful; provider coverage and query status require review.`
         : `No relevant loaded project layer was available for this section. LandDraft did not infer a favorable or unfavorable condition from the absence of evidence.`;
@@ -470,8 +631,23 @@ function resultForLayerSection(
             },
           ]
         : []),
+      ...(evidence.analysis.mappedCoverageAcres !== undefined
+        ? [
+            {
+              id: "coverage",
+              label: "Mapped polygon coverage",
+              value: `${number(evidence.analysis.mappedCoverageAcres, 1)} acres`,
+              note: `${number(evidence.analysis.mappedCoveragePercent ?? 0, 1)}% of the study area; overlapping polygons counted once`,
+            },
+          ]
+        : []),
     ],
     layerIds: candidates.map((layer) => layer.id),
+    mapLayerIds: [
+      ...candidates.filter((layer) => layer.source.kind === "raster").map((layer) => layer.id),
+      ...evidence.mapLayerIds,
+    ].slice(0, 8),
+    analysis: evidence.analysis,
     sources: candidates.map(layerSource),
     ...(status !== "ready" && RECOMMENDED_SOURCES[id]
       ? { recommendations: RECOMMENDED_SOURCES[id] }
@@ -557,6 +733,11 @@ export function analyzeStudyReport(input: {
       { id: "features", label: "Intersecting features", value: number(overviewEvidence.features) },
     ],
     layerIds: availableLayers.map((layer) => layer.id),
+    mapLayerIds: [
+      ...availableLayers.filter((layer) => layer.source.kind === "raster").map((layer) => layer.id),
+      ...overviewEvidence.mapLayerIds,
+    ].slice(0, 6),
+    analysis: overviewEvidence.analysis,
     sources: availableLayers.map(layerSource),
     ...(!availableLayers.length
       ? { gapMessage: "Turn on or add project/public-data layers and re-run the analysis." }
@@ -614,6 +795,7 @@ export function analyzeStudyReport(input: {
       { id: "layers", label: "Project layers reviewed", value: number(availableLayers.length) },
     ],
     layerIds: availableLayers.map((layer) => layer.id),
+    mapLayerIds: [],
     sources: availableLayers.map(layerSource),
     ...(insufficient
       ? { gapMessage: "See Insufficient Data & Follow-up for unresolved evidence categories." }
@@ -654,7 +836,7 @@ export function analyzeStudyReport(input: {
     id: "sources",
     title: "Sources & Method",
     status: allSources.length ? "ready" : "insufficient",
-    generatedNarrative: `This report was generated from the selected boundary and the loaded LandDraft layers available at ${analyzedAt}. Vector features were tested for spatial intersection with the boundary. Raster and viewport-dependent layers are identified as context but are not sampled by this foundation analyzer. Re-running updates generated evidence; user-authored narrative remains separate.`,
+    generatedNarrative: `This report was generated from the selected boundary and the active LandDraft layers available at ${analyzedAt}. Viewport-bound feature services were refreshed for the study extent before vector features were tested for spatial intersection. Polygon coverage was clipped and unioned where geometry quality and volume allowed. Compatible raster layers are mapped as context but are not yet sampled into class-area statistics. Re-running updates generated evidence; user-authored narrative remains separate.`,
     metrics: [{ id: "sources", label: "Documented sources", value: number(allSources.length) }],
     layerIds: availableLayers.map((layer) => layer.id),
     sources: allSources,
@@ -677,7 +859,7 @@ export function analyzeStudyReport(input: {
       sections: orderedResults,
       warnings: [
         "Screening analysis only; not a survey, title opinion, engineering design, environmental site assessment or regulatory determination.",
-        "Only locally available project evidence was analyzed in this run.",
+        "Active project evidence was analyzed; provider failures, truncation and unavailable raster statistics remain explicit limitations.",
       ],
     },
     updatedAt: analyzedAt,

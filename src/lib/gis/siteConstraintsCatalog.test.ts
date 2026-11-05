@@ -8,10 +8,10 @@ test("site screening catalog separates map connections from source-only referenc
     siteConstraintsCatalog.length,
   );
   const mapped = siteConstraintsCatalog.filter((entry) => entry.url);
-  assert.equal(mapped.length, 23);
+  assert.equal(mapped.length, 26);
   for (const entry of mapped) {
     if (entry.rendering === "raster-tiles") {
-      assert.match(entry.url ?? "", /\{z\}.*\{y\}.*\{x\}/);
+      assert.match(entry.url ?? "", /(\{z\}.*\{y\}.*\{x\}|\{bbox-epsg-3857\})/);
       assert.equal(entry.requiresViewport, undefined);
     } else assert.equal(entry.requiresViewport, true);
     assert.ok(entry.minZoom !== undefined);

@@ -9,7 +9,7 @@ Study Area Report is an optional, project-persisted LandDraft workspace that tur
 1. User opens **Study Area Report** from LandDraft Tools.
 2. User chooses a boundary from a polygon layer, the saved project area or an approximate current view.
 3. User edits cover title, subtitle, company and optional logo.
-4. LandDraft analyzes loaded project layers against the boundary.
+4. LandDraft can add the shipped national screening template, then refreshes active live feature services for the exact boundary.
 5. Each report section receives a status: `ready`, `partial` or `insufficient`.
 6. The user enables/disables sections, edits the user narrative and reviews figures and evidence.
 7. A re-run refreshes generated evidence while preserving user-authored narrative and cover settings.
@@ -38,14 +38,16 @@ Every section separates:
 - `userNarrative`: retained across reruns;
 - `metrics`: values with labels and units;
 - `layerIds`: project layers used;
+- `mapLayerIds`: only intersecting or applicable raster layers that belong in that section's figure;
+- `analysis`: per-layer geometry counts, clipped/unioned polygon coverage and concise attribute summaries;
 - `sources`: de-duplicated attribution and URLs;
 - `status` and `gapMessage`.
 
-Initial category matching uses conservative source/name keywords and geometry presence. It does not claim that a loaded layer is authoritative merely because its name resembles a category. Later provider adapters can replace keyword discovery with catalog metadata and dedicated queries.
+Category matching uses conservative source/name keywords, followed by an actual spatial-intersection pass. Features outside the boundary are excluded. Polygon evidence is clipped to the boundary and unioned before section coverage is reported, subject to documented geometry limits. It does not claim that a loaded layer is authoritative merely because its name resembles a category.
 
 ## Map figures
 
-The first increment creates deterministic SVG figures from the selected boundary and loaded project vector layers. These remain printable, source-linked and independent of fragile screenshot timing. Saved LandDraft elevation profiles are embedded as profile figures. Raster/public services remain listed as context evidence even when a client-side feature count is unavailable.
+Report figures are deterministic SVG maps created from each section's `mapLayerIds`. Off-boundary vector features are filtered, geometry is clipped to the selected boundary, polygon/line/point drawing order is controlled and a total feature budget prevents unreadable output. Supported WMS raster context (including Annual NLCD) is rendered for the exact report extent. Saved LandDraft elevation profiles remain embedded as profile figures.
 
 Future server-side rendering can add basemap tiles, provider-specific legends and higher-resolution static cartography, subject to licensing and attribution.
 
@@ -82,12 +84,13 @@ The current foundation does not change payment plans, billing, administrative pe
 - cover branding and printable preview;
 - tests and documentation.
 
-### Phase 2 — provider-backed analysis
+### Phase 2 — provider-backed analysis (in progress)
 
-- server-side adapters for validated terrain, soils, wetlands, flood, hydrography, land cover, environmental facilities, climate and infrastructure;
-- viewport/AOI query budgets, caching, rate-limit handling and provenance;
-- data-quality and coverage matrix;
-- section-specific metrics and professional legends.
+- shipped national screening template and verified USGS Annual NLCD, NRCS SSURGO and FEMA National Risk Index connections;
+- client-side AOI refresh for active ArcGIS/GeoJSON services, with progress, feature budgets, failure/truncation warnings and provenance;
+- section-specific intersection counts, geometry composition, polygon coverage and attribute summaries;
+- boundary-clipped, section-specific maps and WMS extent rendering;
+- remaining: dedicated server-side adapters, provider health/caching, raster zonal statistics and source-specific professional metrics.
 
 ### Phase 3 — advanced report authoring
 
@@ -105,8 +108,9 @@ The current foundation does not change payment plans, billing, administrative pe
 
 ## Known initial limitations
 
-- Analysis is limited to project layers already loaded into the client.
-- Raster layers can be shown as available context but are not sampled in the first increment.
-- Geometry figures are schematic vector maps and do not yet include a rendered basemap.
+- Analysis refreshes active viewport-bound services but does not automatically retrieve source-only/download-only catalog records.
+- Raster layers can be rendered as report context where a compatible WMS template exists, but raster class values are not yet sampled into zonal statistics.
+- Geometry figures are report-specific evidence maps, not survey-grade cartography or a substitute for the provider's original map.
+- Very dense service results are capped and explicitly reported as incomplete; narrowing the study boundary improves completeness.
 - A project-area/current-view boundary is rectangular unless the user selects a polygon layer.
 - Browser print controls final PDF paper/output settings.
