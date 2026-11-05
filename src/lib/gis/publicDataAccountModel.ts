@@ -88,3 +88,21 @@ export function filterAccountServices(account: PublicDataAccount, query = ""): A
     )
     .sort((a, b) => a.name.localeCompare(b.name));
 }
+
+/** Stop managed services from being rematerialized after their map layers are deleted. */
+export function disableEveryMapServices(
+  account: PublicDataAccount,
+  serviceIds: Iterable<string>,
+): PublicDataAccount {
+  const requested = new Set(serviceIds);
+  if (!requested.size) return account;
+  let changed = false;
+  const services = { ...account.services };
+  for (const id of requested) {
+    const service = services[id];
+    if (!service?.everyMap) continue;
+    services[id] = { ...service, everyMap: false };
+    changed = true;
+  }
+  return changed ? { ...account, services } : account;
+}

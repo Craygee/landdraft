@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  disableEveryMapServices,
   emptyPublicDataAccount,
   filterAccountServices,
   normalizePublicDataAccount,
@@ -73,4 +74,36 @@ test("account service filtering keeps removed entries private and sorts visible 
     filterAccountServices(account, "POWER").map((service) => service.id),
     ["alpha"],
   );
+});
+
+test("deleting managed map layers can stop only their every-map services", () => {
+  const account = emptyPublicDataAccount();
+  account.services = {
+    gas: {
+      id: "gas",
+      name: "Texas Gas Plants",
+      url: "https://example.com/gas",
+      everyMap: true,
+    },
+    iou: {
+      id: "iou",
+      name: "IOU - Overview",
+      url: "https://example.com/iou",
+      everyMap: true,
+    },
+    manual: {
+      id: "manual",
+      name: "Manual connection",
+      url: "https://example.com/manual",
+      everyMap: false,
+    },
+  };
+
+  const next = disableEveryMapServices(account, ["gas", "iou", "missing"]);
+
+  assert.equal(next.services["gas"]?.everyMap, false);
+  assert.equal(next.services["iou"]?.everyMap, false);
+  assert.equal(next.services["manual"]?.everyMap, false);
+  assert.equal(account.services["gas"]?.everyMap, true);
+  assert.equal(disableEveryMapServices(next, ["manual"]), next);
 });

@@ -63,6 +63,8 @@ import type { LayerSource } from "@/lib/gis/types";
 import { labelFieldsFromTemplate } from "@/lib/gis/labels";
 import { featureGeometryType } from "@/lib/gis/layerNormalization";
 import { PdfAttachmentPreview } from "./PdfAttachmentPreview";
+import { useAccountPublicData } from "@/lib/gis/AccountPublicData";
+import { disableEveryMapServices } from "@/lib/gis/publicDataAccountModel";
 
 const exportFormats: Array<{ id: ExportFormat; label: string }> = [
   { id: "geojson", label: "GeoJSON" },
@@ -185,6 +187,7 @@ function LayerInsertionLine({
 export function LayerPanel() {
   const wb = useWorkbench();
   const auth = useAuth();
+  const account = useAccountPublicData();
   const { setTableOpen } = useMapRef();
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -212,6 +215,51 @@ export function LayerPanel() {
   const [groupStyleFor, setGroupStyleFor] = useState<string | null>(null);
   const [groupMenuFor, setGroupMenuFor] = useState<string | null>(null);
   const visibleGroups = flattenVisibleGroups(wb.groups);
+
+  const removeLayers = async (ids: string[]) => {
+    const removedIds = new Set(ids);
+    const accountServiceIds = [
+      ...new Set(
+        wb.layers.flatMap((layer) =>
+          removedIds.has(layer.id) &&
+          layer.source.kind === "remote" &&
+          layer.source.accountServiceId
+            ? [layer.source.accountServiceId]
+            : [],
+        ),
+      ),
+    ];
+    if (accountServiceIds.length && !account.ready) {
+      toast.error("Account services are still syncing", {
+        description: "Wait a moment, then delete the layer again so the change can be saved.",
+      });
+      return;
+    }
+    const managed = accountServiceIds.filter(
+      (id) => account.config.services[id]?.everyMap && !account.config.removed[`account:${id}`],
+    );
+    if (managed.length) {
+      const names = managed.map((id) => account.config.services[id]?.name ?? "Account service");
+      const confirmed = window.confirm(
+        `${names.join(", ")} ${managed.length === 1 ? "is" : "are"} set to appear on every editable map. Delete ${managed.length === 1 ? "this layer" : "these layers"} and stop automatically adding ${managed.length === 1 ? "it" : "them"} to projects?`,
+      );
+      if (!confirmed) return;
+      try {
+        await account.update((current) => disableEveryMapServices(current, managed));
+      } catch (error) {
+        toast.error("The account-wide setting was not changed", {
+          description: error instanceof Error ? error.message : "Try again when connected.",
+        });
+        return;
+      }
+    }
+    wb.removeLayers(ids);
+    if (managed.length)
+      toast.success("Automatic project layers removed", {
+        description:
+          "They will no longer be added to every project. The services remain available under My account services.",
+      });
+  };
 
   const groupSelectedLayers = () => {
     const selectedIds = wb.layers
@@ -1366,6 +1414,7 @@ export function LayerPanel() {
                             <LayerChildrenTree
                               parentLayerId={layer.id}
                               onZoom={zoomTo}
+                              onRemoveLayers={removeLayers}
                               draggedLayerId={draggedLayerId}
                               draggedGroupId={draggedGroupId}
                               layerDropTarget={dropTarget}
@@ -1436,7 +1485,7 @@ export function LayerPanel() {
                               />
                               <IconBtn
                                 label="Delete"
-                                onClick={() => wb.removeLayers([layer.id])}
+                                onClick={() => void removeLayers([layer.id])}
                                 icon={<Trash2 className="size-3.5" />}
                                 danger
                               />
@@ -1983,7 +2032,7 @@ export function LayerPanel() {
 
         {wb.selectedLayerIds.length > 1 && (
           <button
-            onClick={() => wb.removeLayers(wb.selectedLayerIds)}
+            onClick={() => void removeLayers(wb.selectedLayerIds)}
             className="mt-2 w-full rounded-xl bg-destructive px-3 py-2 text-xs font-medium text-destructive-foreground"
           >
             Delete {wb.selectedLayerIds.length} selected layers
@@ -2031,6 +2080,7 @@ export function LayerPanel() {
 interface LayerChildrenTreeProps {
   parentLayerId: string;
   onZoom: (data: GisLayer["data"]) => void;
+  onRemoveLayers: (ids: string[]) => Promise<void>;
   draggedLayerId: string | null;
   draggedGroupId: string | null;
   layerDropTarget: string | null;
@@ -2048,6 +2098,7 @@ interface LayerChildrenTreeProps {
 function LayerChildrenTree({
   parentLayerId,
   onZoom,
+  onRemoveLayers,
   draggedLayerId,
   draggedGroupId,
   layerDropTarget,
@@ -2283,7 +2334,7 @@ function LayerChildrenTree({
               )}
               <IconBtn
                 label="Delete sublayer"
-                onClick={() => wb.removeLayers([layer.id])}
+                onClick={() => void onRemoveLayers([layer.id])}
                 icon={<Trash2 className="size-3" />}
                 danger
               />
@@ -2309,6 +2360,7 @@ function LayerChildrenTree({
             <LayerChildrenTree
               parentLayerId={layer.id}
               onZoom={onZoom}
+              onRemoveLayers={onRemoveLayers}
               draggedLayerId={draggedLayerId}
               draggedGroupId={draggedGroupId}
               layerDropTarget={layerDropTarget}
