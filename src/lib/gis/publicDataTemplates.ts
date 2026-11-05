@@ -72,6 +72,44 @@ export const publicDataTemplates: PublicDataTemplate[] = [
     states: ["TX"],
   },
   {
+    id: "west-virginia-energy-infrastructure",
+    name: "West Virginia energy & infrastructure",
+    description:
+      "Official WV parcel and oil/gas context combined with nationwide EIA transmission, natural-gas pipelines, power plants, peaker candidates, wind and solar coverage.",
+    catalogIds: [
+      "wv-parcels-statewide",
+      "wv-oil-gas-wells",
+      "wv-horizontal-well-laterals",
+      "wv-well-pads",
+      "wv-gas-pipeline-construction",
+      "us-power-plants-eia",
+      "us-peaker-plant-candidates-eia",
+      "tx-transmission",
+      "tx-pipelines",
+      "us-wind-turbines",
+      "us-solar",
+    ],
+    states: ["WV"],
+  },
+  {
+    id: "west-virginia-site-screening",
+    name: "West Virginia site screening",
+    description:
+      "Statewide parcels plus current roads, counties, municipalities, opportunity zones, wetlands, flood hazards and topographic context.",
+    catalogIds: [
+      "wv-parcels-statewide",
+      "us-primary-roads-current",
+      "us-local-roads-current",
+      "us-counties-current",
+      "us-incorporated-places-current",
+      "us-opportunity-zones",
+      "fws-wetlands",
+      "fema-flood-zones",
+      "usgs-topographic-map",
+    ],
+    states: ["WV"],
+  },
+  {
     id: "national-energy-development",
     name: "National energy development",
     description:

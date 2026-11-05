@@ -53,6 +53,11 @@ const tx = (entry: Omit<CatalogEntry, "states">): CatalogEntry => ({
   states: ["TX"],
   entitlementKey: entry.entitlementKey ?? "data.state.TX",
 });
+const wv = (entry: Omit<CatalogEntry, "states">): CatalogEntry => ({
+  ...entry,
+  states: ["WV"],
+  entitlementKey: entry.entitlementKey ?? "data.state.WV",
+});
 const live = { connection: "live" as const, updateCadence: "Publisher managed" };
 
 /** Curated public-agency services. Download records are clearly marked and never masquerade as APIs. */
@@ -136,6 +141,34 @@ export const catalog: CatalogEntry[] = [
     license: "State of Ohio public-use geospatial data; AS-IS disclaimer applies.",
     defaultStyle: { fillOpacity: 0, strokeColor: "#2f7d4f", strokeWidth: 1 },
   },
+  wv({
+    id: "wv-parcels-statewide",
+    name: "West Virginia Land Parcels — Statewide",
+    agency: "West Virginia County Assessors / WV Property Tax Division / WVGISTC",
+    category: "Property",
+    geometry: "polygon",
+    connection: "live",
+    updateCadence: "Published Tax Year 2023 service; county source timing varies",
+    description:
+      "Official statewide public parcel compilation maintained for county real-property inventory. The publisher identifies the current service as Tax Year 2023 and advises checking deeds, plats, assessors and county clerks for verification. Loaded only for the visible area; not a survey or title record.",
+    url: "https://services.wvgis.wvu.edu/arcgis/rest/services/Planning_Cadastre/WV_Parcels/MapServer/0",
+    sourcePage: "https://www.mapwv.gov/parcel/",
+    keywords: [
+      "West Virginia parcel",
+      "property",
+      "cadastral",
+      "assessor",
+      "tax",
+      "owner",
+      "acreage",
+    ],
+    requiresViewport: true,
+    minZoom: 12,
+    countyField: "COUNTY",
+    license:
+      "Public agency service provided AS-IS and without warranty. Retain county/WV Property Tax Division/WVGISTC attribution; verify against official county records.",
+    defaultStyle: { fillOpacity: 0, strokeColor: "#2f7d4f", strokeWidth: 1 },
+  }),
   tx({
     id: "txdot-roadways",
     name: "State Roadways",
@@ -424,6 +457,124 @@ export const catalog: CatalogEntry[] = [
       pointIconSize: 18,
       pointIconColor: "#0f766e",
       fillOpacity: 0,
+    },
+  }),
+  wv({
+    id: "wv-oil-gas-wells",
+    name: "West Virginia Oil & Gas Wells — WVDEP",
+    agency: "West Virginia Department of Environmental Protection — Office of Oil and Gas",
+    category: "Oil & Gas",
+    geometry: "point",
+    ...live,
+    description:
+      "Official WVDEP oil-and-gas well locations with permit, API, well type/use, depth, responsible party, status, formation and record-date attributes. Locations and status are screening information; confirm permit records and current field conditions with WVDEP.",
+    url: "https://tagis.dep.wv.gov/arcgis/rest/services/WVDEP_enterprise/oil_gas/MapServer/7",
+    sourcePage: "https://dep.wv.gov/oil-and-gas/Pages/default.aspx",
+    keywords: [
+      "West Virginia oil well",
+      "natural gas well",
+      "API",
+      "permit",
+      "Marcellus",
+      "formation",
+      "operator",
+    ],
+    requiresViewport: true,
+    minZoom: 10,
+    countyField: "county",
+    license:
+      "Publicly accessible WVDEP government data; no item-specific reuse license is advertised. Retain WVDEP attribution and verify official permit records.",
+    defaultStyle: {
+      pointIcon: "⊙",
+      pointIconSize: 17,
+      pointIconColor: "#9a3412",
+      fillOpacity: 0,
+    },
+  }),
+  wv({
+    id: "wv-horizontal-well-laterals",
+    name: "West Virginia Horizontal Well Laterals — WVDEP",
+    agency: "West Virginia Department of Environmental Protection — Office of Oil and Gas",
+    category: "Oil & Gas",
+    geometry: "line",
+    ...live,
+    description:
+      "Official WVDEP simplified horizontal-well lateral geometry with permit, API, operator, well status, formation and surface/landing/bottom coordinate attributes. Simplified mapped laterals are for screening and are not surveyed as-built locations.",
+    url: "https://tagis.dep.wv.gov/arcgis/rest/services/WVDEP_enterprise/oil_gas/MapServer/6",
+    sourcePage: "https://dep.wv.gov/oil-and-gas/Pages/default.aspx",
+    keywords: [
+      "West Virginia horizontal well",
+      "lateral",
+      "Marcellus",
+      "natural gas",
+      "well bore",
+      "permit",
+    ],
+    requiresViewport: true,
+    minZoom: 9,
+    countyField: "county",
+    license:
+      "Publicly accessible WVDEP government data; no item-specific reuse license is advertised. Retain WVDEP attribution and verify official permit/as-built records.",
+    defaultStyle: {
+      fillOpacity: 0,
+      strokeColor: PIPELINE_COMMODITY_COLORS.naturalGas,
+      strokeWidth: 2,
+      strokePattern: "dashed",
+    },
+  }),
+  wv({
+    id: "wv-well-pads",
+    name: "West Virginia Oil & Gas Well Pads — WVDEP",
+    agency: "West Virginia Department of Environmental Protection — Office of Oil and Gas",
+    category: "Oil & Gas",
+    geometry: "polygon",
+    ...live,
+    description:
+      "WVDEP mapped oil-and-gas well-pad footprints with site, year, image-year and modification attributes where available. Imagery-derived or administrative footprints may not represent current disturbed limits.",
+    url: "https://tagis.dep.wv.gov/arcgis/rest/services/WVDEP_enterprise/oil_gas/MapServer/10",
+    sourcePage: "https://dep.wv.gov/oil-and-gas/Pages/default.aspx",
+    keywords: ["West Virginia well pad", "oil", "natural gas", "Marcellus", "site"],
+    requiresViewport: true,
+    minZoom: 10,
+    license:
+      "Publicly accessible WVDEP government data; no item-specific reuse license is advertised. Retain WVDEP attribution and verify current conditions.",
+    defaultStyle: {
+      fillColor: "#c2410c",
+      fillOpacity: 0.18,
+      strokeColor: "#9a3412",
+      strokeWidth: 1.5,
+    },
+  }),
+  wv({
+    id: "wv-gas-pipeline-construction",
+    name: "West Virginia Gas Pipeline Construction Areas — WVDEP",
+    agency: "West Virginia Department of Environmental Protection — TAGIS",
+    category: "Oil & Gas",
+    geometry: "polygon",
+    ...live,
+    description:
+      "WVDEP mapped gas-pipeline construction and workspace areas with pipeline, company, permit, route, spread, facility and operation attributes where populated. This is construction/permit context, not a complete map of operating transmission or gathering pipelines.",
+    url: "https://tagis.dep.wv.gov/arcgis/rest/services/app_services/pipeline_construction_main_wm/MapServer/0",
+    sourcePage: "https://tagis.dep.wv.gov/portal/home/",
+    keywords: [
+      "West Virginia gas pipeline",
+      "construction",
+      "workspace",
+      "permit",
+      "route",
+      "spread",
+      "natural gas",
+    ],
+    requiresViewport: true,
+    minZoom: 8,
+    license:
+      "Publicly accessible WVDEP government data; no item-specific reuse license is advertised. Retain WVDEP/TAGIS attribution and confirm permit status and operating assets independently.",
+    defaultStyle: {
+      fillColor: PIPELINE_COMMODITY_COLORS.naturalGas,
+      fillOpacity: 0.14,
+      strokeColor: PIPELINE_COMMODITY_COLORS.naturalGas,
+      strokeWidth: 2,
+      strokePattern: "dashed",
     },
   }),
   tx({

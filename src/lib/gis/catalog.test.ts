@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { catalog, retiredCatalog } from "./catalog.ts";
+import { catalog, retiredCatalog, searchCatalog } from "./catalog.ts";
 import { PIPELINE_COMMODITY_COLORS, pipelineCommodityColor } from "./pipelineCommodity.ts";
 import {
   EIA_TRANSMISSION_VOLTAGE_RULES,
@@ -125,4 +125,35 @@ test("ships live power, peaker-screen and Texas gas-plant layers with explicit p
   assert.equal(processing?.connection, "live");
   assert.match(processing?.url ?? "", /Natural_Gas_Processing_Plants\/FeatureServer\/2$/);
   assert.match(processing?.description ?? "", /independently hosted copy/i);
+});
+
+test("ships verified West Virginia parcel and oil-gas services without duplicating national energy sources", () => {
+  const parcels = catalog.find((entry) => entry.id === "wv-parcels-statewide");
+  const wells = catalog.find((entry) => entry.id === "wv-oil-gas-wells");
+  const laterals = catalog.find((entry) => entry.id === "wv-horizontal-well-laterals");
+  const pads = catalog.find((entry) => entry.id === "wv-well-pads");
+  const construction = catalog.find((entry) => entry.id === "wv-gas-pipeline-construction");
+
+  assert.deepEqual(parcels?.states, ["WV"]);
+  assert.equal(parcels?.countyField, "COUNTY");
+  assert.match(parcels?.url ?? "", /Planning_Cadastre\/WV_Parcels\/MapServer\/0$/);
+  assert.match(parcels?.description ?? "", /Tax Year 2023/i);
+  assert.equal(parcels?.requiresViewport, true);
+
+  assert.match(wells?.url ?? "", /WVDEP_enterprise\/oil_gas\/MapServer\/7$/);
+  assert.equal(wells?.defaultStyle?.pointIcon, "⊙");
+  assert.match(laterals?.url ?? "", /oil_gas\/MapServer\/6$/);
+  assert.equal(laterals?.defaultStyle?.strokeColor, PIPELINE_COMMODITY_COLORS.naturalGas);
+  assert.match(pads?.url ?? "", /oil_gas\/MapServer\/10$/);
+  assert.equal(construction?.geometry, "polygon");
+  assert.match(construction?.description ?? "", /not a complete map of operating/i);
+
+  const westVirginia = searchCatalog("", null, ["WV"]);
+  const ids = new Set(westVirginia.map((entry) => entry.id));
+  assert.ok(ids.has("wv-parcels-statewide"));
+  assert.ok(ids.has("wv-oil-gas-wells"));
+  assert.ok(ids.has("tx-transmission"));
+  assert.ok(ids.has("tx-pipelines"));
+  assert.ok(ids.has("us-power-plants-eia"));
+  assert.equal(ids.has("tx-parcels"), false);
 });

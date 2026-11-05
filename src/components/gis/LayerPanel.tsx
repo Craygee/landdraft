@@ -1185,7 +1185,7 @@ export function LayerPanel() {
                         />
                         <div
                           data-layer-drop-id={layer.id}
-                          className="flex min-h-8 items-center gap-1.5"
+                          className="flex min-h-8 flex-wrap items-center gap-x-1.5 gap-y-0.5"
                         >
                           <input
                             type="checkbox"
@@ -1272,9 +1272,11 @@ export function LayerPanel() {
                               const name = window.prompt("Rename layer", layer.name);
                               if (name) wb.updateLayer(layer.id, { name });
                             }}
-                            className="min-w-0 flex-1 text-left"
+                            className="order-last w-full min-w-0 text-left"
                           >
-                            <div className="truncate text-xs font-medium">{layer.name}</div>
+                            <div className="line-clamp-2 break-words text-xs font-medium leading-4">
+                              {layer.name}
+                            </div>
                             {layer.source.kind === "remote" && (
                               <div
                                 className={cn(
@@ -1329,7 +1331,7 @@ export function LayerPanel() {
                                 : "Set up labels"
                             }
                             className={cn(
-                              "rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground",
+                              "ml-auto rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground",
                               layer.style.labelEnabled && "bg-primary text-primary-foreground",
                             )}
                           >
@@ -2109,7 +2111,10 @@ function LayerChildrenTree({
             position="after"
           />
         )}
-        <div data-layer-drop-id={layer.id} className="flex min-h-7 items-center gap-1">
+        <div
+          data-layer-drop-id={layer.id}
+          className="flex min-h-7 flex-wrap items-center gap-x-1 gap-y-0.5"
+        >
           <input
             type="checkbox"
             checked={
@@ -2190,9 +2195,9 @@ function LayerChildrenTree({
             }}
             data-help={layer.name}
             title={`${layer.name} · Double-click to rename`}
-            className="min-w-0 flex-1 truncate text-left text-[10px] font-medium"
+            className="order-last w-full min-w-0 text-left text-[10px] font-medium leading-3.5"
           >
-            {layer.name}
+            <span className="line-clamp-2 break-words">{layer.name}</span>
           </button>
           {hasChildren && <Layers className="size-3 shrink-0 text-primary" aria-hidden="true" />}
           <button
@@ -2211,7 +2216,7 @@ function LayerChildrenTree({
                 : "Set up labels in Style"
             }
             className={cn(
-              "rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground",
+              "ml-auto rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground",
               layer.style.labelEnabled && "bg-primary text-primary-foreground",
             )}
           >

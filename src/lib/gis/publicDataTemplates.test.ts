@@ -38,6 +38,24 @@ test("study area report template spans the core evidence categories", () => {
   assert.ok(ids.has("us-power-plants-eia"));
 });
 
+test("West Virginia templates combine state services with the existing national energy foundation", () => {
+  const energy = publicDataTemplateEntries("west-virginia-energy-infrastructure");
+  const energyIds = new Set(energy.map((entry) => entry.id));
+  const screening = publicDataTemplateEntries("west-virginia-site-screening");
+  const screeningIds = new Set(screening.map((entry) => entry.id));
+
+  assert.ok(energyIds.has("wv-oil-gas-wells"));
+  assert.ok(energyIds.has("wv-horizontal-well-laterals"));
+  assert.ok(energyIds.has("wv-gas-pipeline-construction"));
+  assert.ok(energyIds.has("tx-transmission"));
+  assert.ok(energyIds.has("tx-pipelines"));
+  assert.ok(energyIds.has("us-power-plants-eia"));
+  assert.ok(screeningIds.has("wv-parcels-statewide"));
+  assert.ok(screeningIds.has("us-local-roads-current"));
+  assert.ok(screeningIds.has("fema-flood-zones"));
+  assert.ok(screeningIds.has("usgs-topographic-map"));
+});
+
 test("applying a template adds visible layers without duplicating catalog sources", () => {
   const first = applyPublicDataTemplateLayers([], "national-energy-development", 100);
   assert.equal(first.added, 5);
