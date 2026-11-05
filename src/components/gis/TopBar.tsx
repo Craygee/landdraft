@@ -152,6 +152,23 @@ export function TopBar({
 
       <ProjectAreaControl />
 
+      {wb.canViewNotes && (
+        <button
+          type="button"
+          onClick={() => setRecordsOpen(!recordsOpen)}
+          aria-pressed={recordsOpen}
+          aria-label="Open records and files"
+          title="Records & files — project notes, layer notes, documents and activity"
+          data-tour="top-records"
+          className={cn(
+            "flex size-8 shrink-0 items-center justify-center rounded-xl border border-border transition-colors hover:bg-accent",
+            recordsOpen && "border-primary bg-primary/10 text-primary",
+          )}
+        >
+          <NotebookTabs className="size-4" />
+        </button>
+      )}
+
       <div className="ml-auto hidden items-center gap-1 min-[1480px]:flex">
         {wb.canUseAi && (
           <BarBtn
@@ -237,15 +254,6 @@ export function TopBar({
               closeCompactMenus();
             }}
             tourId="top-projects"
-          />
-        )}
-        {wb.canViewNotes && (
-          <BarBtn
-            icon={<NotebookTabs className="size-4" />}
-            label="Records"
-            help="Project notes, documents, activity, email, and packets"
-            onClick={() => setRecordsOpen(!recordsOpen)}
-            tourId="top-records"
           />
         )}
       </div>

@@ -62,6 +62,7 @@ import { cn } from "@/lib/utils";
 import type { LayerSource } from "@/lib/gis/types";
 import { labelFieldsFromTemplate } from "@/lib/gis/labels";
 import { featureGeometryType } from "@/lib/gis/layerNormalization";
+import { PdfAttachmentPreview } from "./PdfAttachmentPreview";
 
 const exportFormats: Array<{ id: ExportFormat; label: string }> = [
   { id: "geojson", label: "GeoJSON" },
@@ -1868,6 +1869,10 @@ export function LayerPanel() {
                                                             {document.name} ·{" "}
                                                             {formatFileSize(document.size)}
                                                           </span>
+                                                          <PdfAttachmentPreview
+                                                            attachment={document}
+                                                            compact
+                                                          />
                                                           <button
                                                             type="button"
                                                             onClick={() =>

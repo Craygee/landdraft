@@ -1,6 +1,7 @@
 import { siteConstraintsCatalog } from "./siteConstraintsCatalog.ts";
 import { infrastructureCatalog } from "./infrastructureCatalog.ts";
 import type { LayerStyle } from "./types.ts";
+import { PIPELINE_COMMODITY_COLORS, TEXAS_RRC_COMMODITY_RULES } from "./pipelineCommodity.ts";
 export type CatalogCategory =
   | "Property"
   | "Oil & Gas"
@@ -459,20 +460,9 @@ export const catalog: CatalogEntry[] = [
       strokeWidth: 2.5,
       categorized: {
         enabled: true,
-        field: "COMMODITY1",
-        rules: [
-          { value: "NGT", label: "Natural gas transmission", color: "#f59e0b", visible: true },
-          { value: "NGG", label: "Natural gas gathering", color: "#fbbf24", visible: true },
-          { value: "NGZ", label: "Natural gas offshore", color: "#d97706", visible: true },
-          { value: "CRO", label: "Crude oil transmission", color: "#111827", visible: true },
-          { value: "CRL", label: "Crude oil gathering", color: "#4b5563", visible: true },
-          { value: "CFL", label: "Full well stream", color: "#78716c", visible: true },
-          { value: "HVL", label: "Highly volatile liquid", color: "#db2777", visible: true },
-          { value: "PRD", label: "Refined product", color: "#2563eb", visible: true },
-          { value: "CO2", label: "Carbon dioxide", color: "#16a34a", visible: true },
-          { value: "AA", label: "Anhydrous ammonia", color: "#7c3aed", visible: true },
-        ],
-        fallbackColor: "#9ca3af",
+        field: "COMMODITY",
+        rules: TEXAS_RRC_COMMODITY_RULES,
+        fallbackColor: PIPELINE_COMMODITY_COLORS.unknown,
         fallbackVisible: true,
       },
     },

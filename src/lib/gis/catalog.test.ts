@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { catalog, retiredCatalog } from "./catalog.ts";
+import { PIPELINE_COMMODITY_COLORS, pipelineCommodityColor } from "./pipelineCommodity.ts";
 
 test("offers detailed RRC pipeline data without removing the broader EIA layer", () => {
   const rrc = catalog.find((entry) => entry.id === "tx-rrc-pipelines");
@@ -10,6 +11,16 @@ test("offers detailed RRC pipeline data without removing the broader EIA layer",
   assert.equal(rrc?.agency, "Railroad Commission of Texas");
   assert.equal(rrc?.countyField, "COUNTY_NAME");
   assert.match(rrc?.url ?? "", /RRC_Public_Viewer_Srvs\/MapServer\/13$/);
+  assert.equal(rrc?.defaultStyle?.categorized?.field, "COMMODITY");
+  assert.equal(
+    rrc?.defaultStyle?.categorized?.rules.find((rule) => rule.value === "NATURAL GAS")?.color,
+    PIPELINE_COMMODITY_COLORS.naturalGas,
+  );
+  assert.equal(
+    pipelineCommodityColor("natural gas offshore"),
+    PIPELINE_COMMODITY_COLORS.naturalGas,
+  );
+  assert.equal(pipelineCommodityColor("CRUDE OIL"), PIPELINE_COMMODITY_COLORS.crudeOil);
   assert.equal(eia?.agency, "U.S. Energy Information Administration");
   assert.equal(countyZips?.connection, "download");
   assert.match(countyZips?.sourcePage ?? "", /^https:\/\/mft\.rrc\.texas\.gov\//);

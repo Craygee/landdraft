@@ -4,6 +4,8 @@ import {
   uploadPrivateProjectFile,
 } from "@/lib/cloud";
 import type { EmailDocumentDetails, ProjectDocument } from "./types";
+import { isPdfProjectDocument } from "./projectDocument";
+export { isPdfProjectDocument } from "./projectDocument";
 
 const safeName = (value: string) =>
   value
@@ -48,7 +50,11 @@ export async function uploadProjectAsset(input: {
 
 export async function projectAssetBlob(document: ProjectDocument): Promise<Blob> {
   const bytes = await downloadPrivateProjectFile(document.storagePath);
-  return new Blob([bytes], { type: document.mimeType || "application/octet-stream" });
+  return new Blob([bytes], {
+    type: isPdfProjectDocument(document)
+      ? "application/pdf"
+      : document.mimeType || "application/octet-stream",
+  });
 }
 
 export async function downloadProjectAsset(document: ProjectDocument): Promise<void> {

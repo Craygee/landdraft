@@ -54,6 +54,7 @@ import type {
   ProjectRecords,
 } from "@/lib/gis/types";
 import { cn } from "@/lib/utils";
+import { PdfAttachmentPreview } from "./PdfAttachmentPreview";
 
 type Tab = "notes" | "layer-notes" | "files" | "activity" | "email" | "summary";
 
@@ -1476,6 +1477,7 @@ export function ProjectRecordsPanel() {
                             <span className="min-w-0 flex-1 truncate text-[10px] font-semibold">
                               {document.name}
                             </span>
+                            <PdfAttachmentPreview attachment={document} />
                             <button
                               type="button"
                               onClick={() => void downloadProjectAsset(document)}
@@ -1938,6 +1940,7 @@ export function ProjectRecordsPanel() {
                                     {new Date(document.createdAt).toLocaleDateString()}
                                   </span>
                                 </span>
+                                <PdfAttachmentPreview attachment={document} />
                                 <button
                                   type="button"
                                   onClick={() => void downloadProjectAsset(document)}
@@ -2122,6 +2125,7 @@ export function ProjectRecordsPanel() {
                       />{" "}
                       Packet
                     </label>
+                    <PdfAttachmentPreview attachment={document} />
                     <button
                       onClick={() => void downloadProjectAsset(document)}
                       className="rounded-lg p-2 hover:bg-accent"
