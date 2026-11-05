@@ -57,6 +57,8 @@ import { basemapProbeUrl, saveBasemapUrlOverride } from "@/lib/gis/basemaps";
 import { cn } from "@/lib/utils";
 import { importFile } from "@/lib/gis/import";
 
+const MY_ACCOUNT_SERVICES_FILTER = "__my-account-services__";
+
 const catalogLayerStyle = (entry: CatalogEntry) => {
   const published = entry.defaultStyle ?? {};
   if (entry.id === "tx-parcels")
@@ -129,9 +131,11 @@ export function DataDrawer() {
 
   const results = useMemo(
     () =>
-      searchCatalog(query, category, wb.selectedStates, account.config.restoredDefaults).filter(
-        (entry) => !account.config.removed[`catalog:${entry.id}`],
-      ),
+      category === MY_ACCOUNT_SERVICES_FILTER
+        ? []
+        : searchCatalog(query, category, wb.selectedStates, account.config.restoredDefaults).filter(
+            (entry) => !account.config.removed[`catalog:${entry.id}`],
+          ),
     [query, category, wb.selectedStates, account.config.removed, account.config.restoredDefaults],
   );
   const repositories = useMemo(
@@ -778,6 +782,12 @@ export function DataDrawer() {
                   {c}
                 </Chip>
               ))}
+              <Chip
+                active={category === MY_ACCOUNT_SERVICES_FILTER}
+                onClick={() => setCategory(MY_ACCOUNT_SERVICES_FILTER)}
+              >
+                My account services
+              </Chip>
             </div>
           )}
           {mode === "layers" && category === SURFACE_WATER_CATEGORY && (
@@ -840,7 +850,13 @@ export function DataDrawer() {
         <div className="flex-1 overflow-y-auto px-4 py-3">
           {mode === "layers" ? (
             <div className="space-y-2">
-              <AccountServiceLibrary onLoad={(service) => void loadCustom(service)} />
+              {category === MY_ACCOUNT_SERVICES_FILTER && (
+                <AccountServiceLibrary
+                  query={query}
+                  showWhenEmpty
+                  onLoad={(service) => void loadCustom(service)}
+                />
+              )}
               {results.map((entry) => (
                 <div key={entry.id} className="rounded-xl border border-border bg-card p-3">
                   <div className="flex items-start gap-2">
@@ -1049,7 +1065,7 @@ export function DataDrawer() {
                   )}
                 </div>
               ))}
-              {results.length === 0 && (
+              {results.length === 0 && category !== MY_ACCOUNT_SERVICES_FILTER && (
                 <p className="py-6 text-center text-sm text-muted-foreground">
                   No datasets match that search.
                 </p>
@@ -1108,6 +1124,12 @@ export function DataDrawer() {
           <div className="mt-4">
             <PublicDataAccountSettings />
           </div>
+
+          {mode === "layers" && category !== MY_ACCOUNT_SERVICES_FILTER && (
+            <div className="mt-4">
+              <AccountServiceLibrary query={query} onLoad={(service) => void loadCustom(service)} />
+            </div>
+          )}
 
           <div className="mt-4 flex gap-2 rounded-xl bg-secondary/60 p-3 text-[10px] leading-relaxed text-muted-foreground">
             <ShieldAlert className="mt-0.5 size-4 shrink-0 text-clay" />

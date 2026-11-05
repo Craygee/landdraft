@@ -17,6 +17,7 @@
 | Census tracts           | U.S. Census Bureau TIGERweb   | 2020 tracts.                                                                                                                                                        |
 | Opportunity Zones       | HUD / Treasury ArcGIS service | OZ 1.0 designations; verify eligibility against Treasury/IRS records.                                                                                               |
 | Transmission lines      | EIA/HIFLD public service      | Nationwide screening layer; voltage classes receive a consistent LandDraft palette and dashed lines.                                                                |
+| Electric power plants   | U.S. EIA live feature service | Nationwide plant, utility, technology, primary-fuel and capacity attributes. A separate LandDraft view screens combustion-turbine/internal-combustion peaker candidates and labels the classification as non-official. |
 | Natural-gas pipelines   | EIA public service            | Nationwide generalized interstate/intrastate/gathering layer; type colors are consistent. NPMS remains the authoritative controlled-access source where applicable. |
 | Wind turbines           | USGS / LBNL                   | Nationwide utility-scale turbine database with a wind-turbine symbol.                                                                                               |
 | Solar facilities        | USGS / LBNL                   | Nationwide large-scale photovoltaic facilities.                                                                                                                     |
@@ -26,7 +27,16 @@ Official service directories checked:
 
 - <https://tigerweb.geo.census.gov/tigerwebmain/TIGERweb_restmapservice.html>
 - <https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/US_Electric_Power_Transmission_Lines/FeatureServer/0>
+- <https://services2.arcgis.com/FiaPA4ga0iQKduv3/ArcGIS/rest/services/Power_Plants_in_the_US/FeatureServer/0>
 - <https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/Natural_Gas_Interstate_and_Intrastate_Pipelines_1/FeatureServer/0>
+
+## Texas plant layers added 2026-11-05
+
+- **Texas Natural-Gas Power Plants — EIA** uses the national EIA plant service with the publisher-side filter `State = 'Texas' AND PrimSource = 'natural gas'`. It returned 301 records during release validation.
+- **Texas Natural Gas Processing Plants — HIFLD Archive** is a live independently hosted public ArcGIS copy containing 209 Texas points. The item credits HIFLD/ORNL/ANL/NGA source data and was republished in May 2024, but it is not a current Railroad Commission facility feed. LandDraft exposes `SOURCEDATE`, `VAL_DATE`, status, operator and positional-reliability fields and tells users to confirm current facilities against RRC records.
+- The RRC R-3 monthly JSON reporting program remains the current official plant-report source, but it is a monthly ZIP/report dataset rather than a ready-to-map live geometry API. LandDraft does not mislabel those reports as a direct GIS layer.
+
+The public-data drawer now leaves account-connected services at the bottom of the ready-to-add library. **My account services** in the filter row brings only those private account services forward. Account URLs, every-map preferences, removals and health history remain private to the signed-in account.
 
 ## State parcel services enabled in this increment
 

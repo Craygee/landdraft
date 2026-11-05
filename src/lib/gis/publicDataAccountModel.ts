@@ -75,3 +75,16 @@ export function normalizePublicDataAccount(value: unknown): PublicDataAccount {
     restoredDefaults: candidate.restoredDefaults ?? {},
   };
 }
+
+export function filterAccountServices(account: PublicDataAccount, query = ""): AccountService[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  return Object.values(account.services)
+    .filter((service) => !account.removed[`account:${service.id}`])
+    .filter(
+      (service) =>
+        !normalizedQuery ||
+        service.name.toLowerCase().includes(normalizedQuery) ||
+        service.url.toLowerCase().includes(normalizedQuery),
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
+}

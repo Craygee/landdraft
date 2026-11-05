@@ -4,7 +4,11 @@ import { toast } from "sonner";
 import { useAccountPublicData } from "@/lib/gis/AccountPublicData";
 import { catalog, retiredCatalog } from "@/lib/gis/catalog";
 import { probeConnectionUrl } from "@/lib/gis/connectionHealth";
-import { removalEligible, type AccountService } from "@/lib/gis/publicDataAccountModel";
+import {
+  filterAccountServices,
+  removalEligible,
+  type AccountService,
+} from "@/lib/gis/publicDataAccountModel";
 
 const report = (error: unknown) =>
   toast.error("Account library was not updated", {
@@ -107,15 +111,29 @@ export function RemovePublicDataSource({ sourceId }: { sourceId: string }) {
   );
 }
 
-export function AccountServiceLibrary({ onLoad }: { onLoad: (service: AccountService) => void }) {
+export function AccountServiceLibrary({
+  onLoad,
+  query = "",
+  showWhenEmpty = false,
+}: {
+  onLoad: (service: AccountService) => void;
+  query?: string;
+  showWhenEmpty?: boolean;
+}) {
   const account = useAccountPublicData();
-  const services = Object.values(account.config.services).filter(
-    (service) => !account.config.removed[`account:${service.id}`],
-  );
-  if (!services.length) return null;
+  const normalizedQuery = query.trim().toLowerCase();
+  const services = filterAccountServices(account.config, query);
+  if (!services.length && !showWhenEmpty) return null;
   return (
     <section className="mb-3 space-y-2">
       <h3 className="text-sm font-semibold">My account services</h3>
+      {!services.length && (
+        <p className="rounded-xl border border-border bg-card p-3 text-xs text-muted-foreground">
+          {normalizedQuery
+            ? "No connected account services match this search."
+            : "No account-wide services have been connected yet."}
+        </p>
+      )}
       {services.map((service) => (
         <div key={service.id} className="rounded-xl border p-3 text-xs">
           <strong className="break-words">{service.name}</strong>

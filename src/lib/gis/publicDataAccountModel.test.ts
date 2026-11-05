@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   emptyPublicDataAccount,
+  filterAccountServices,
   normalizePublicDataAccount,
   recordSourceHealth,
   removalEligible,
@@ -38,4 +39,38 @@ test("new accounts start with shipped catalog available and no account overrides
   const first = emptyPublicDataAccount();
   first.removed["catalog:example"] = at(19).toISOString();
   assert.deepEqual(emptyPublicDataAccount().removed, {});
+});
+
+test("account service filtering keeps removed entries private and sorts visible matches", () => {
+  const account = emptyPublicDataAccount();
+  account.services = {
+    removed: {
+      id: "removed",
+      name: "Removed power service",
+      url: "https://example.com/removed",
+      everyMap: false,
+    },
+    zulu: {
+      id: "zulu",
+      name: "Zulu pipelines",
+      url: "https://example.com/pipeline",
+      everyMap: false,
+    },
+    alpha: {
+      id: "alpha",
+      name: "Alpha plants",
+      url: "https://example.com/power",
+      everyMap: true,
+    },
+  };
+  account.removed["account:removed"] = "2026-11-05T00:00:00Z";
+
+  assert.deepEqual(
+    filterAccountServices(account).map((service) => service.id),
+    ["alpha", "zulu"],
+  );
+  assert.deepEqual(
+    filterAccountServices(account, "POWER").map((service) => service.id),
+    ["alpha"],
+  );
 });

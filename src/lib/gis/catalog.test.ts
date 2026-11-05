@@ -51,3 +51,29 @@ test("keeps the retired USGS contour source reconnectable without shipping it to
     true,
   );
 });
+
+test("ships live power, peaker-screen and Texas gas-plant layers with explicit provenance", () => {
+  const power = catalog.find((entry) => entry.id === "us-power-plants-eia");
+  const peakers = catalog.find((entry) => entry.id === "us-peaker-plant-candidates-eia");
+  const texasGasPower = catalog.find((entry) => entry.id === "tx-natural-gas-power-plants-eia");
+  const processing = catalog.find((entry) => entry.id === "tx-natural-gas-processing-plants-hifld");
+
+  assert.equal(power?.category, "Energy");
+  assert.equal(power?.connection, "live");
+  assert.equal(power?.states, "US");
+  assert.match(power?.url ?? "", /Power_Plants_in_the_US\/FeatureServer\/0$/);
+  assert.equal(power?.defaultStyle?.pointIcon, "⚡");
+
+  assert.match(peakers?.where ?? "", /Combustion Turbine/);
+  assert.match(peakers?.description ?? "", /not an official dispatch or market designation/i);
+  assert.equal(peakers?.states, "US");
+
+  assert.equal(texasGasPower?.states instanceof Array, true);
+  assert.match(texasGasPower?.where ?? "", /State = 'Texas'/);
+  assert.match(texasGasPower?.where ?? "", /PrimSource = 'natural gas'/);
+
+  assert.equal(processing?.category, "Oil & Gas");
+  assert.equal(processing?.connection, "live");
+  assert.match(processing?.url ?? "", /Natural_Gas_Processing_Plants\/FeatureServer\/2$/);
+  assert.match(processing?.description ?? "", /independently hosted copy/i);
+});
