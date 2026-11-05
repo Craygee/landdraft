@@ -56,47 +56,15 @@ import {
 import { basemapProbeUrl, saveBasemapUrlOverride } from "@/lib/gis/basemaps";
 import { cn } from "@/lib/utils";
 import { importFile } from "@/lib/gis/import";
+import {
+  NO_PUBLIC_DATA_TEMPLATE,
+  catalogLayerStyle,
+  isSourceOnlyCatalogEntry,
+  publicDataTemplateById,
+  publicDataTemplates,
+} from "@/lib/gis/publicDataTemplates";
 
 const MY_ACCOUNT_SERVICES_FILTER = "__my-account-services__";
-
-const catalogLayerStyle = (entry: CatalogEntry) => {
-  const published = entry.defaultStyle ?? {};
-  if (entry.id === "tx-parcels")
-    return {
-      fillOpacity: 0,
-      strokeWidth: 1,
-      labelEnabled: true,
-      labelTemplate: "{OWNER_NAME}",
-      labelFields: ["OWNER_NAME"],
-      labelMinZoom: 11,
-      labelSize: 11,
-      labelScaleWithZoom: true,
-      ...published,
-    };
-  if (entry.id === "us-state-boundaries-shp")
-    return {
-      fillOpacity: 0.08,
-      strokeWidth: 2,
-      strokeColor: "#3b6ea5",
-      fillColor: "#3b6ea5",
-      labelEnabled: true,
-      labelTemplate: "{NAME}",
-      labelFields: ["NAME"],
-      labelSize: 12,
-      ...published,
-    };
-  if (entry.id === "us-opportunity-zones")
-    return {
-      fillOpacity: 0.22,
-      strokeWidth: 1.5,
-      strokeColor: "#6b3fa0",
-      fillColor: "#8a5bb8",
-      labelEnabled: false,
-      ...published,
-    };
-  if (entry.geometry === "line") return { fillOpacity: 0, strokeWidth: 2.5, ...published };
-  return published;
-};
 
 export function DataDrawer() {
   const account = useAccountPublicData();
@@ -122,6 +90,8 @@ export function DataDrawer() {
   const [connections, setConnections] = useState<ConnectionResult[]>([]);
   const [checkingConnections, setCheckingConnections] = useState(false);
   const [connectionsOpen, setConnectionsOpen] = useState(false);
+  const [templateId, setTemplateId] = useState(NO_PUBLIC_DATA_TEMPLATE);
+  const [hideSourceOnly, setHideSourceOnly] = useState(false);
   const [reconnectUrls, setReconnectUrls] = useState<Record<string, string>>({});
   const [reconnectNotes, setReconnectNotes] = useState<Record<string, string>>({});
   const layersRef = useRef(wb.layers);
@@ -134,9 +104,18 @@ export function DataDrawer() {
       category === MY_ACCOUNT_SERVICES_FILTER
         ? []
         : searchCatalog(query, category, wb.selectedStates, account.config.restoredDefaults).filter(
-            (entry) => !account.config.removed[`catalog:${entry.id}`],
+            (entry) =>
+              !account.config.removed[`catalog:${entry.id}`] &&
+              (!hideSourceOnly || !isSourceOnlyCatalogEntry(entry)),
           ),
-    [query, category, wb.selectedStates, account.config.removed, account.config.restoredDefaults],
+    [
+      query,
+      category,
+      wb.selectedStates,
+      account.config.removed,
+      account.config.restoredDefaults,
+      hideSourceOnly,
+    ],
   );
   const repositories = useMemo(
     () => searchRepositories(query, wb.selectedStates),
@@ -736,6 +715,62 @@ export function DataDrawer() {
         </div>
 
         <div className="space-y-2 border-b border-border px-4 py-3">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-semibold">
+              <Library className="size-3.5 text-primary" /> Public data template
+            </div>
+            <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+              Add and turn on a prepared set of public layers. Existing matching layers are kept and
+              made visible, not duplicated.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <select
+              aria-label="Public data template"
+              value={templateId}
+              onChange={(event) => setTemplateId(event.target.value)}
+              className="min-w-0 flex-1 rounded-xl border border-border bg-card px-3 py-2 text-xs"
+            >
+              <option value={NO_PUBLIC_DATA_TEMPLATE}>No template</option>
+              {publicDataTemplates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={templateId === NO_PUBLIC_DATA_TEMPLATE}
+              onClick={() => {
+                const template = publicDataTemplateById(templateId);
+                if (!template) return;
+                const result = wb.applyPublicDataTemplate(template.id);
+                const detail = [
+                  result.added ? `${result.added} added` : "",
+                  result.shown ? `${result.shown} turned on` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
+                toast.success(
+                  result.added || result.shown
+                    ? `${template.name} applied`
+                    : `${template.name} is already active`,
+                  { description: detail || "No duplicate layers were created." },
+                );
+              }}
+              className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+            >
+              Apply
+            </button>
+          </div>
+          {publicDataTemplateById(templateId) && (
+            <p className="text-[10px] text-muted-foreground">
+              {publicDataTemplateById(templateId)?.description}
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-2 border-b border-border px-4 py-3">
           <div className="grid grid-cols-2 gap-1 rounded-xl bg-secondary p-1">
             <button
               onClick={() => setMode("layers")}
@@ -767,27 +802,38 @@ export function DataDrawer() {
             />
           </div>
           {mode === "layers" && (
-            <div className="flex flex-wrap gap-1">
-              <Chip active={category === null} onClick={() => setCategory(null)}>
-                All
-              </Chip>
-              <Chip
-                active={category === SURFACE_WATER_CATEGORY}
-                onClick={() => setCategory(SURFACE_WATER_CATEGORY)}
-              >
-                {SURFACE_WATER_CATEGORY}
-              </Chip>
-              {categories.map((c) => (
-                <Chip key={c} active={category === c} onClick={() => setCategory(c)}>
-                  {c}
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-1">
+                <Chip active={category === null} onClick={() => setCategory(null)}>
+                  All
                 </Chip>
-              ))}
-              <Chip
-                active={category === MY_ACCOUNT_SERVICES_FILTER}
-                onClick={() => setCategory(MY_ACCOUNT_SERVICES_FILTER)}
-              >
-                My account services
-              </Chip>
+                <Chip
+                  active={category === SURFACE_WATER_CATEGORY}
+                  onClick={() => setCategory(SURFACE_WATER_CATEGORY)}
+                >
+                  {SURFACE_WATER_CATEGORY}
+                </Chip>
+                {categories.map((c) => (
+                  <Chip key={c} active={category === c} onClick={() => setCategory(c)}>
+                    {c}
+                  </Chip>
+                ))}
+                <Chip
+                  active={category === MY_ACCOUNT_SERVICES_FILTER}
+                  onClick={() => setCategory(MY_ACCOUNT_SERVICES_FILTER)}
+                >
+                  My account services
+                </Chip>
+              </div>
+              <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={hideSourceOnly}
+                  onChange={(event) => setHideSourceOnly(event.target.checked)}
+                  className="accent-primary"
+                />
+                Hide source-only entries
+              </label>
             </div>
           )}
           {mode === "layers" && category === SURFACE_WATER_CATEGORY && (

@@ -52,6 +52,11 @@ import { DEFAULT_BASEMAP_ID } from "./basemaps";
 import { createCoreLayerGroups, ensureCoreLayerGroups } from "./projectGroups";
 import { normalizeLayerData, normalizeLayerStyle } from "./layerNormalization";
 import { dedupePublicDataLayers } from "./displayLayers";
+import {
+  NO_PUBLIC_DATA_TEMPLATE,
+  applyPublicDataTemplateLayers,
+  publicDataTemplateById,
+} from "./publicDataTemplates";
 
 export type DrawMode =
   | "none"
@@ -153,21 +158,28 @@ const initialState = (): WorkbenchState => ({
   studyReport: undefined,
 });
 
-const blankProjectState = (name: string): ProjectState => ({
-  version: 1,
-  landDraftVersion: LANDDRAFT_APP_VERSION,
-  name,
-  groups: createCoreLayerGroups(),
-  layers: [],
-  basemapId: DEFAULT_BASEMAP_ID,
-  mapView: { center: [-98.5, 31.3], zoom: 6, bearing: 0, pitch: 0 },
-  units: { area: "acres", length: "miles" },
-  selectedStates: ["TX"],
-  derivedLayerGroupId: "working",
-  parentProjectId: null,
-  enabledSubprojectIds: [],
-  records: emptyProjectRecords(),
-});
+const blankProjectState = (
+  name: string,
+  publicDataTemplateId = NO_PUBLIC_DATA_TEMPLATE,
+): ProjectState => {
+  const template = publicDataTemplateById(publicDataTemplateId);
+  const templateLayers = applyPublicDataTemplateLayers([], publicDataTemplateId).layers;
+  return {
+    version: 1,
+    landDraftVersion: LANDDRAFT_APP_VERSION,
+    name,
+    groups: createCoreLayerGroups(),
+    layers: templateLayers,
+    basemapId: DEFAULT_BASEMAP_ID,
+    mapView: { center: [-98.5, 31.3], zoom: 6, bearing: 0, pitch: 0 },
+    units: { area: "acres", length: "miles" },
+    selectedStates: Array.from(new Set(["TX", ...(template?.states ?? [])])),
+    derivedLayerGroupId: "working",
+    parentProjectId: null,
+    enabledSubprojectIds: [],
+    records: emptyProjectRecords(),
+  };
+};
 
 const normalizedLayer = (layer: GisLayer, index: number): GisLayer => {
   let source =
@@ -432,7 +444,8 @@ export interface WorkbenchApi extends WorkbenchState {
     relatedId?: string;
   }) => void;
   saveProject: (reason?: SaveReason) => Promise<ProjectVersion | undefined>;
-  createProject: (name: string) => Promise<void>;
+  createProject: (name: string, publicDataTemplateId?: string) => Promise<void>;
+  applyPublicDataTemplate: (templateId: string) => { added: number; shown: number };
   createSubproject: (name: string, parentProjectId?: string) => Promise<void>;
   duplicateProject: (id: string) => Promise<void>;
   duplicateVersion: (versionId: string) => Promise<void>;
@@ -1550,16 +1563,63 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   );
 
   const createProject = useCallback<WorkbenchApi["createProject"]>(
-    async (rawName) => {
+    async (rawName, publicDataTemplateId = NO_PUBLIC_DATA_TEMPLATE) => {
       const userId = auth.user?.id;
       if (!userId) return;
       const name = rawName.trim() || "Untitled project";
-      const project = await workspaceProjectStore.create(userId, name, blankProjectState(name));
+      const project = await workspaceProjectStore.create(
+        userId,
+        name,
+        blankProjectState(name, publicDataTemplateId),
+      );
       const projects = await workspaceProjectStore.list(userId);
       skipNextAutosave.current = true;
       setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
     },
     [auth.user?.id],
+  );
+
+  const applyPublicDataTemplate = useCallback<WorkbenchApi["applyPublicDataTemplate"]>(
+    (templateId) => {
+      const template = publicDataTemplateById(templateId);
+      if (!template) return { added: 0, shown: 0 };
+      if (
+        !sharedCapabilities(stateRef.current.accessRole, stateRef.current.activeShare?.permissions)
+          .canEditProject
+      )
+        return { added: 0, shown: 0 };
+      const preview = applyPublicDataTemplateLayers(stateRef.current.layers, templateId);
+      const summary = { added: preview.added, shown: preview.shown };
+      if (!summary.added && !summary.shown) return summary;
+      setState((current) => {
+        const result = applyPublicDataTemplateLayers(current.layers, templateId);
+        if (!result.added && !result.shown) return current;
+        const selectedStates = Array.from(
+          new Set([...current.selectedStates, ...(template.states ?? [])]),
+        );
+        const event: ProjectEvent = {
+          id: uid(),
+          type: current.accessRole === "admin" ? "remote-change" : "public-data",
+          title: `Applied ${template.name}`,
+          detail: `${result.added} public layers added; ${result.shown} existing layers turned on`,
+          createdAt: Date.now(),
+          actor: auth.user?.name || auth.user?.email || "LandDraft user",
+          projectId: current.projectId,
+          projectName: current.projectName,
+        };
+        return {
+          ...current,
+          layers: result.layers,
+          selectedStates,
+          records: {
+            ...current.records,
+            events: [event, ...current.records.events].slice(0, 1000),
+          },
+        };
+      });
+      return summary;
+    },
+    [auth.user?.email, auth.user?.name],
   );
 
   const createSubproject = useCallback<WorkbenchApi["createSubproject"]>(
@@ -2177,6 +2237,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       addProjectEvent,
       saveProject,
       createProject,
+      applyPublicDataTemplate,
       createSubproject,
       duplicateProject,
       duplicateVersion,
@@ -2242,6 +2303,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       addProjectEvent,
       saveProject,
       createProject,
+      applyPublicDataTemplate,
       createSubproject,
       duplicateProject,
       duplicateVersion,

@@ -22,6 +22,11 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { projectVersionLabel } from "@/lib/appVersion";
 import { projectAncestorIds, projectDescendants } from "@/lib/gis/projectHierarchy";
+import {
+  NO_PUBLIC_DATA_TEMPLATE,
+  publicDataTemplateById,
+  publicDataTemplates,
+} from "@/lib/gis/publicDataTemplates";
 import { useWorkbench } from "@/lib/gis/store";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +39,7 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
   const [destination, setDestination] = useState("");
   const [savingMove, setSavingMove] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newProjectTemplateId, setNewProjectTemplateId] = useState(NO_PUBLIC_DATA_TEMPLATE);
   const [view, setView] = useState<View>("projects");
   const [subprojectName, setSubprojectName] = useState("");
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
@@ -56,8 +62,9 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
 
   const createProject = () => {
     if (!newName.trim()) return;
-    void wb.createProject(newName).then(() => {
+    void wb.createProject(newName, newProjectTemplateId).then(() => {
       setNewName("");
+      setNewProjectTemplateId(NO_PUBLIC_DATA_TEMPLATE);
       toast.success("New project created");
     });
   };
@@ -231,23 +238,46 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
 
       {view === "projects" ? (
         <>
-          <div className="mb-3 flex gap-1">
-            <input
-              value={newName}
-              onChange={(event) => setNewName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") createProject();
-              }}
-              placeholder="New project name"
-              className="min-w-0 flex-1 rounded-xl border border-border bg-card px-3 py-2 outline-none focus:border-primary"
-            />
-            <button
-              onClick={createProject}
-              className="rounded-xl bg-primary px-3 text-primary-foreground"
-              aria-label="Create project"
-            >
-              <Plus className="size-4" />
-            </button>
+          <div className="mb-3 space-y-2 rounded-xl border border-border bg-card p-2">
+            <div className="flex gap-1">
+              <input
+                value={newName}
+                onChange={(event) => setNewName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") createProject();
+                }}
+                placeholder="New project name"
+                className="min-w-0 flex-1 rounded-xl border border-border bg-card px-3 py-2 outline-none focus:border-primary"
+              />
+              <button
+                onClick={createProject}
+                className="rounded-xl bg-primary px-3 text-primary-foreground"
+                aria-label="Create project"
+              >
+                <Plus className="size-4" />
+              </button>
+            </div>
+            <label className="block text-[10px] font-medium text-muted-foreground">
+              Public data template
+              <select
+                aria-label="New project public data template"
+                value={newProjectTemplateId}
+                onChange={(event) => setNewProjectTemplateId(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-border bg-card px-2 py-2 text-xs text-foreground"
+              >
+                <option value={NO_PUBLIC_DATA_TEMPLATE}>No template — blank project</option>
+                {publicDataTemplates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {publicDataTemplateById(newProjectTemplateId) && (
+              <p className="text-[10px] leading-relaxed text-muted-foreground">
+                {publicDataTemplateById(newProjectTemplateId)?.description}
+              </p>
+            )}
           </div>
 
           <section>
