@@ -78,17 +78,26 @@ services:
 - **WVDEP Gas Pipeline Construction Areas**, with construction/workspace, route, company and
   permit context. This layer is deliberately described as construction context, not a complete
   operating transmission/gathering-pipeline inventory.
+- **West Virginia Natural Gas Pipelines — WVDOT**, an official statewide reference layer with
+  about 1,500 mapped line segments and company-code, diameter and mapped-tolerance attributes
+  where populated. WVDOT says the parent asset service is updated as needed, but it does not
+  advertise the pipeline layer's source vintage or survey/as-built accuracy. LandDraft therefore
+  labels it as planning/screening data and directs users to verify current assets through NPMS,
+  operator records and 811 before digging.
 
 Two West Virginia templates reuse those state services together with the existing national EIA
-transmission, natural-gas pipeline, power-plant and peaker-candidate connections, plus USGS/LBNL
-wind and solar data. Reusing catalog references prevents separate copies of the same national
-records from being created merely to label them West Virginia.
+transmission, power-plant and peaker-candidate connections, plus USGS/LBNL wind and solar data.
+The West Virginia energy template uses the more detailed WVDOT gas-pipeline reference instead of
+also loading the generalized national EIA gas layer, avoiding duplicate pipeline linework while
+leaving the EIA source available separately in the catalog.
 
 Official services checked:
 
 - <https://services.wvgis.wvu.edu/arcgis/rest/services/Planning_Cadastre/WV_Parcels/MapServer/0>
 - <https://tagis.dep.wv.gov/arcgis/rest/services/WVDEP_enterprise/oil_gas/MapServer>
 - <https://tagis.dep.wv.gov/arcgis/rest/services/app_services/pipeline_construction_main_wm/MapServer/0>
+- <https://gis.transportation.wv.gov/arcgis/rest/services/Assets/Assets/FeatureServer/64>
+- <https://transportation.wv.gov/gis-web-services>
 - <https://dep.wv.gov/oil-and-gas/Pages/default.aspx>
 
 Each service returned browser CORS permission for `landdraft.net`, supports bounded pagination and

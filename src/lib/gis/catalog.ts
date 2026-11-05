@@ -577,6 +577,38 @@ export const catalog: CatalogEntry[] = [
       strokePattern: "dashed",
     },
   }),
+  wv({
+    id: "wv-natural-gas-pipelines-wvdot",
+    name: "West Virginia Natural Gas Pipelines — WVDOT",
+    agency: "West Virginia Department of Transportation — Geospatial Transportation Information",
+    category: "Energy",
+    geometry: "line",
+    connection: "live",
+    updateCadence: "WVDOT managed; updated as needed",
+    description:
+      "Official WVDOT statewide reference geometry for natural-gas pipelines, with company code, pipe diameter and mapped-location tolerance attributes where populated. WVDOT does not publish a source vintage or survey/as-built accuracy for this layer. Use it for planning and screening only; verify current transmission assets through NPMS/operator records and contact 811 before digging.",
+    url: "https://gis.transportation.wv.gov/arcgis/rest/services/Assets/Assets/FeatureServer/64",
+    sourcePage: "https://transportation.wv.gov/gis-web-services",
+    keywords: [
+      "West Virginia natural gas pipeline",
+      "pipeline",
+      "midstream",
+      "transmission",
+      "diameter",
+      "company",
+      "WVDOT",
+    ],
+    requiresViewport: true,
+    minZoom: 8,
+    license:
+      "Publicly accessible WVDOT government GIS service marked for everyone. Retain WVDOT attribution; source vintage and survey accuracy are not advertised, so verify current assets independently.",
+    defaultStyle: {
+      fillOpacity: 0,
+      strokeColor: PIPELINE_COMMODITY_COLORS.naturalGas,
+      strokeWidth: 2.5,
+      strokePattern: "dashed",
+    },
+  }),
   tx({
     id: "tx-rrc-pipelines",
     name: "Texas RRC Pipelines — Detailed",

@@ -133,6 +133,7 @@ test("ships verified West Virginia parcel and oil-gas services without duplicati
   const laterals = catalog.find((entry) => entry.id === "wv-horizontal-well-laterals");
   const pads = catalog.find((entry) => entry.id === "wv-well-pads");
   const construction = catalog.find((entry) => entry.id === "wv-gas-pipeline-construction");
+  const pipelines = catalog.find((entry) => entry.id === "wv-natural-gas-pipelines-wvdot");
 
   assert.deepEqual(parcels?.states, ["WV"]);
   assert.equal(parcels?.countyField, "COUNTY");
@@ -147,11 +148,19 @@ test("ships verified West Virginia parcel and oil-gas services without duplicati
   assert.match(pads?.url ?? "", /oil_gas\/MapServer\/10$/);
   assert.equal(construction?.geometry, "polygon");
   assert.match(construction?.description ?? "", /not a complete map of operating/i);
+  assert.match(pipelines?.url ?? "", /Assets\/Assets\/FeatureServer\/64$/);
+  assert.equal(pipelines?.geometry, "line");
+  assert.deepEqual(pipelines?.states, ["WV"]);
+  assert.equal(pipelines?.defaultStyle?.strokeColor, PIPELINE_COMMODITY_COLORS.naturalGas);
+  assert.equal(pipelines?.defaultStyle?.strokePattern, "dashed");
+  assert.match(pipelines?.description ?? "", /does not publish a source vintage/i);
+  assert.match(pipelines?.description ?? "", /contact 811/i);
 
   const westVirginia = searchCatalog("", null, ["WV"]);
   const ids = new Set(westVirginia.map((entry) => entry.id));
   assert.ok(ids.has("wv-parcels-statewide"));
   assert.ok(ids.has("wv-oil-gas-wells"));
+  assert.ok(ids.has("wv-natural-gas-pipelines-wvdot"));
   assert.ok(ids.has("tx-transmission"));
   assert.ok(ids.has("tx-pipelines"));
   assert.ok(ids.has("us-power-plants-eia"));

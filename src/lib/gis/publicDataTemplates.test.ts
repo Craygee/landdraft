@@ -47,8 +47,9 @@ test("West Virginia templates combine state services with the existing national 
   assert.ok(energyIds.has("wv-oil-gas-wells"));
   assert.ok(energyIds.has("wv-horizontal-well-laterals"));
   assert.ok(energyIds.has("wv-gas-pipeline-construction"));
+  assert.ok(energyIds.has("wv-natural-gas-pipelines-wvdot"));
   assert.ok(energyIds.has("tx-transmission"));
-  assert.ok(energyIds.has("tx-pipelines"));
+  assert.equal(energyIds.has("tx-pipelines"), false);
   assert.ok(energyIds.has("us-power-plants-eia"));
   assert.ok(screeningIds.has("wv-parcels-statewide"));
   assert.ok(screeningIds.has("us-local-roads-current"));
