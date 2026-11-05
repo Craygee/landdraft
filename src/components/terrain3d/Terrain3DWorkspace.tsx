@@ -215,7 +215,9 @@ export function Terrain3DWorkspace() {
   const [mode, setMode] = useState<TerrainAnalysisMode>("quick");
   const [bounds, setBounds] = useState<TerrainBounds | null>(null);
   const [selecting, setSelecting] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(() =>
+    typeof window === "undefined" ? false : window.innerWidth >= 768,
+  );
   const [projectContextEnabled, setProjectContextEnabled] = useState(true);
   const [wetlandsEnabled, setWetlandsEnabled] = useState(true);
   const [wetlands, setWetlands] = useState<FeatureCollection>(emptyCollection);
@@ -299,11 +301,18 @@ export function Terrain3DWorkspace() {
     mapRef.current = map;
     setMap(map);
     const container = containerRef.current;
-    const resizeObserver = new ResizeObserver(() => map.resize());
+    let resizeFrame = 0;
+    const resizeMap = () => {
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(() => map.resize());
+    };
+    const resizeObserver = new ResizeObserver(resizeMap);
     resizeObserver.observe(container);
-    const resizeFrame = requestAnimationFrame(() => map.resize());
+    window.addEventListener("resize", resizeMap);
+    window.visualViewport?.addEventListener("resize", resizeMap);
+    resizeMap();
     const onLoad = () => {
-      map.resize();
+      resizeMap();
       setMapStatus((status) => (status === "degraded" ? status : "ready"));
     };
     const onError = () => setMapStatus((status) => (status === "error" ? status : "degraded"));
@@ -360,6 +369,8 @@ export function Terrain3DWorkspace() {
       analysisAbortRef.current?.abort();
       cancelAnimationFrame(resizeFrame);
       resizeObserver.disconnect();
+      window.removeEventListener("resize", resizeMap);
+      window.visualViewport?.removeEventListener("resize", resizeMap);
       map.off("load", onLoad);
       map.off("error", onError);
       map.off("style.load", onStyle);
@@ -543,7 +554,7 @@ export function Terrain3DWorkspace() {
   const areaKm2 = bounds ? terrainBoundsAreaKm2(bounds) : null;
 
   return (
-    <div className="app-viewport flex flex-col overflow-hidden bg-background">
+    <div className="terrain-3d-workspace app-safe-frame app-viewport flex flex-col overflow-hidden bg-background">
       <header className="z-30 flex min-h-16 items-center gap-3 border-b border-border bg-card px-3 sm:px-5">
         <a
           href="/"
@@ -571,10 +582,10 @@ export function Terrain3DWorkspace() {
         </button>
       </header>
 
-      <main className="relative min-h-0 flex-1 overflow-hidden">
+      <main className="terrain-3d-map-region relative min-h-0 flex-1 overflow-hidden">
         <div
           ref={containerRef}
-          className="absolute inset-0 min-h-[240px] bg-[#dfe8d8]"
+          className="terrain-3d-map-canvas absolute inset-0 h-full w-full bg-[#dfe8d8]"
           aria-label="Interactive 3D terrain map"
         />
 

@@ -2,6 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { catalog, retiredCatalog } from "./catalog.ts";
 import { PIPELINE_COMMODITY_COLORS, pipelineCommodityColor } from "./pipelineCommodity.ts";
+import {
+  EIA_TRANSMISSION_VOLTAGE_RULES,
+  TRANSMISSION_VOLTAGE_COLORS,
+  transmissionVoltageColor,
+} from "./transmissionVoltage.ts";
 
 test("offers detailed RRC pipeline data without removing the broader EIA layer", () => {
   const rrc = catalog.find((entry) => entry.id === "tx-rrc-pipelines");
@@ -24,6 +29,20 @@ test("offers detailed RRC pipeline data without removing the broader EIA layer",
   assert.equal(eia?.agency, "U.S. Energy Information Administration");
   assert.equal(countyZips?.connection, "download");
   assert.match(countyZips?.sourcePage ?? "", /^https:\/\/mft\.rrc\.texas\.gov\//);
+});
+
+test("styles national transmission lines from the numeric VOLTAGE attribute", () => {
+  const transmission = catalog.find((entry) => entry.id === "tx-transmission");
+
+  assert.equal(transmission?.defaultStyle?.strokePattern, "dashed");
+  assert.equal(transmission?.defaultStyle?.categorized?.field, "VOLTAGE");
+  assert.equal(transmission?.defaultStyle?.categorized?.rules, EIA_TRANSMISSION_VOLTAGE_RULES);
+  assert.equal(transmissionVoltageColor(69), TRANSMISSION_VOLTAGE_COLORS.under100);
+  assert.equal(transmissionVoltageColor("138"), TRANSMISSION_VOLTAGE_COLORS.from100To161);
+  assert.equal(transmissionVoltageColor(345), TRANSMISSION_VOLTAGE_COLORS.from288To449);
+  assert.equal(transmissionVoltageColor(500), TRANSMISSION_VOLTAGE_COLORS.from450To734);
+  assert.equal(transmissionVoltageColor(765), TRANSMISSION_VOLTAGE_COLORS.from735);
+  assert.equal(transmissionVoltageColor(-999999), TRANSMISSION_VOLTAGE_COLORS.unknown);
 });
 
 test("offers the official Census state-boundary shapefile as ready-to-add public data", () => {

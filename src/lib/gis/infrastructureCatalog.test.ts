@@ -72,7 +72,7 @@ test("national core layers remain available for every selected state with consis
   const transmission = catalog.find((entry) => entry.id === "tx-transmission")!;
   assert.equal(transmission.states, "US");
   assert.equal(transmission.defaultStyle?.strokePattern, "dashed");
-  assert.equal(transmission.defaultStyle?.categorized?.field, "VOLT_CLASS");
+  assert.equal(transmission.defaultStyle?.categorized?.field, "VOLTAGE");
   const gas = catalog.find((entry) => entry.id === "tx-pipelines")!;
   assert.equal(gas.states, "US");
   assert.equal(gas.defaultStyle?.categorized?.field, "TYPEPIPE");

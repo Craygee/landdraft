@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   TERRAIN_3D_DEFAULT_ZOOM,
   normalizeTerrainBounds,
@@ -14,6 +15,13 @@ import {
 
 test("opens the terrain workspace at the requested zoom level", () => {
   assert.equal(TERRAIN_3D_DEFAULT_ZOOM, 11);
+});
+
+test("gives the terrain map a definite full-viewport flex region", () => {
+  const css = readFileSync(new URL("../../styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.terrain-3d-workspace\s*\{[^}]*height:\s*var\(--app-viewport-height\)/s);
+  assert.match(css, /\.terrain-3d-map-region\s*\{[^}]*height:\s*0/s);
+  assert.match(css, /\.terrain-3d-map-canvas[\s\S]*height:\s*100%/);
 });
 
 test("loads a reference map without making the optional terrain mesh a startup dependency", () => {

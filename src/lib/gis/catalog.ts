@@ -2,6 +2,10 @@ import { siteConstraintsCatalog } from "./siteConstraintsCatalog.ts";
 import { infrastructureCatalog } from "./infrastructureCatalog.ts";
 import type { LayerStyle } from "./types.ts";
 import { PIPELINE_COMMODITY_COLORS, TEXAS_RRC_COMMODITY_RULES } from "./pipelineCommodity.ts";
+import {
+  EIA_TRANSMISSION_VOLTAGE_RULES,
+  TRANSMISSION_VOLTAGE_COLORS,
+} from "./transmissionVoltage.ts";
 export type CatalogCategory =
   | "Property"
   | "Oil & Gas"
@@ -298,16 +302,9 @@ export const catalog: CatalogEntry[] = [
       strokePattern: "dashed",
       categorized: {
         enabled: true,
-        field: "VOLT_CLASS",
-        rules: [
-          { value: "UNDER 100", label: "Under 100 kV", color: "#74a9cf", visible: true },
-          { value: "100-161", label: "100–161 kV", color: "#2b8cbe", visible: true },
-          { value: "220-287", label: "220–287 kV", color: "#7b3294", visible: true },
-          { value: "345", label: "345 kV", color: "#d7301f", visible: true },
-          { value: "500", label: "500 kV", color: "#ef6c00", visible: true },
-          { value: "735 AND ABOVE", label: "735+ kV", color: "#8b0000", visible: true },
-        ],
-        fallbackColor: "#6b7280",
+        field: "VOLTAGE",
+        rules: EIA_TRANSMISSION_VOLTAGE_RULES,
+        fallbackColor: TRANSMISSION_VOLTAGE_COLORS.unknown,
         fallbackVisible: true,
       },
     },
