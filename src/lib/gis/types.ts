@@ -216,6 +216,13 @@ export type PrintAnnotation =
       backgroundColor: string;
       textColor: string;
       contentMode: "label" | "label-gps" | "gps" | "label-dms" | "dms";
+      feature?: {
+        layerId: string;
+        layerName: string;
+        featureId?: string | number;
+        attributes: Record<string, string | number | boolean | null>;
+        fields: string[];
+      };
     };
 
 export type PrintFurnitureCorner =

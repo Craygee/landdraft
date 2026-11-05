@@ -20,6 +20,7 @@ import {
   Move,
   Printer,
   RotateCcw,
+  Tags,
   Trash2,
   Type,
   X,
@@ -55,6 +56,11 @@ import { uploadProjectAsset } from "@/lib/gis/projectRecords";
 import { PRINT_PAPER_OPTIONS, printPageGeometry } from "@/lib/gis/printLayout";
 import { PrintLegend } from "./PrintLegend";
 import { buildParcelLabels, isParcelLayer, parcelLabelSourceId } from "@/lib/gis/parcelDisplay";
+import {
+  defaultFeatureCalloutFields,
+  featureCalloutLines,
+  printableFeatureAttributes,
+} from "@/lib/gis/printCallouts";
 
 const uid = () => window.crypto.randomUUID();
 
@@ -100,6 +106,45 @@ const defaultComposition = (
   ...(view ? { mapView: view } : {}),
 });
 
+const projectPrintComposition = (
+  projectName: string,
+  layers: GisLayer[],
+  saved: PrintComposition | undefined,
+  view: PrintComposition["mapView"] | undefined,
+  pendingAnalysisId?: string | null,
+  analysisLayers: GisLayer[] = layers,
+): PrintComposition => {
+  const base = saved ?? defaultComposition(projectName, layers, view);
+  const normalizedBase =
+    base.annotations.length === 0 && base.frame.width < 75
+      ? { ...base, frame: defaultPrintFrame(base.paper, base.orientation) }
+      : base;
+  const known = new Set(layers.map((layer) => layer.id));
+  const included = normalizedBase.includedLayerIds.filter((id) => known.has(id));
+  const defaults = defaultComposition(projectName, layers, view);
+  const initial: PrintComposition = {
+    ...defaults,
+    ...normalizedBase,
+    furniture: { ...defaults.furniture, ...(normalizedBase.furniture ?? {}) },
+    ...((view ?? normalizedBase.mapView) ? { mapView: view ?? normalizedBase.mapView } : {}),
+    includedLayerIds:
+      included.length > 0
+        ? included
+        : layers.filter((layer) => layer.visible).map((layer) => layer.id),
+    legendItems: Object.fromEntries(
+      layers.map((layer) => [
+        layer.id,
+        normalizedBase.legendItems?.[layer.id] ?? { visible: layer.visible, name: layer.name },
+      ]),
+    ),
+  };
+  initial.showScale = false;
+  initial.frame = analysisPrintFrame(initial.frame, Boolean(initial.analysisLayerIds?.length));
+  return pendingAnalysisId
+    ? addAnalysisToComposition(initial, pendingAnalysisId, analysisLayers)
+    : initial;
+};
+
 export function PrintComposer() {
   const wb = useWorkbench();
   const auth = useAuth();
@@ -118,49 +163,26 @@ export function PrintComposer() {
         pitch: liveMap.getPitch(),
       }
     : undefined;
-  const [composition, setComposition] = useState<PrintComposition>(() => {
-    const base = wb.printComposition ?? defaultComposition(wb.projectName, wb.displayLayers);
-    const normalizedBase =
-      base.annotations.length === 0 && base.frame.width < 75
-        ? { ...base, frame: defaultPrintFrame(base.paper, base.orientation) }
-        : base;
-    const known = new Set(wb.displayLayers.map((layer) => layer.id));
-    const included = normalizedBase.includedLayerIds.filter((id) => known.has(id));
-    const legendItems = Object.fromEntries(
-      wb.displayLayers.map((layer) => [
-        layer.id,
-        normalizedBase.legendItems?.[layer.id] ?? { visible: layer.visible, name: layer.name },
-      ]),
-    );
-    const initial: PrintComposition = {
-      ...defaultComposition(wb.projectName, wb.displayLayers, liveView),
-      ...normalizedBase,
-      furniture: {
-        ...defaultComposition(wb.projectName, wb.displayLayers, liveView).furniture,
-        ...(normalizedBase.furniture ?? {}),
-      },
-      ...((liveView ?? normalizedBase.mapView)
-        ? { mapView: liveView ?? normalizedBase.mapView }
-        : {}),
-      includedLayerIds:
-        included.length > 0
-          ? included
-          : wb.displayLayers.filter((layer) => layer.visible).map((layer) => layer.id),
-      legendItems,
-    };
-    initial.showScale = false;
-    initial.frame = analysisPrintFrame(initial.frame, Boolean(initial.analysisLayerIds?.length));
-    return pendingPrintAnalysisId
-      ? addAnalysisToComposition(initial, pendingPrintAnalysisId, wb.layers)
-      : initial;
-  });
+  const [composition, setComposition] = useState<PrintComposition>(() =>
+    projectPrintComposition(
+      wb.projectName,
+      wb.displayLayers,
+      wb.printComposition,
+      liveView,
+      pendingPrintAnalysisId,
+      wb.layers,
+    ),
+  );
+  const hydratedProjectIdRef = useRef(wb.projectId);
   useEffect(() => {
     setPendingPrintAnalysisId(null);
   }, [setPendingPrintAnalysisId]);
   const analysisPanels = printAnalysisPanels(composition, wb.layers);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [placementMode, setPlacementMode] = useState<
-    null | { kind: "line" | "arrow"; start?: { x: number; y: number } } | { kind: "callout" }
+    | null
+    | { kind: "line" | "arrow"; start?: { x: number; y: number } }
+    | { kind: "callout" | "feature-callout" }
   >(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const previewViewportRef = useRef<HTMLElement>(null);
@@ -180,6 +202,40 @@ export function PrintComposer() {
   const [fittedPageScale, setFittedPageScale] = useState(1);
   const [pageScaleOverride, setPageScaleOverride] = useState<number | null>(null);
   const setSavedComposition = wb.setPrintComposition;
+
+  useEffect(() => {
+    if (hydratedProjectIdRef.current === wb.projectId) return;
+    hydratedProjectIdRef.current = wb.projectId;
+    const currentView = liveMap
+      ? {
+          center: [liveMap.getCenter().lng, liveMap.getCenter().lat] as [number, number],
+          zoom: liveMap.getZoom(),
+          bearing: liveMap.getBearing(),
+          pitch: liveMap.getPitch(),
+        }
+      : undefined;
+    const next = projectPrintComposition(
+      wb.projectName,
+      wb.displayLayers,
+      wb.printComposition,
+      currentView,
+      pendingPrintAnalysisId,
+      wb.layers,
+    );
+    setComposition(next);
+    setSelectedId(null);
+    setPlacementMode(null);
+    setPageScaleOverride(null);
+    if (next.mapView && printMapRef.current) printMapRef.current.jumpTo(next.mapView);
+  }, [
+    liveMap,
+    pendingPrintAnalysisId,
+    wb.displayLayers,
+    wb.printComposition,
+    wb.projectId,
+    wb.projectName,
+    wb.layers,
+  ]);
 
   const pageGeometry = useMemo(
     () => printPageGeometry(composition.paper, composition.orientation),
@@ -231,9 +287,12 @@ export function PrintComposer() {
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setSavedComposition(composition), 500);
+    const projectId = wb.projectId;
+    const timer = window.setTimeout(() => {
+      if (hydratedProjectIdRef.current === projectId) setSavedComposition(composition);
+    }, 500);
     return () => window.clearTimeout(timer);
-  }, [composition, setSavedComposition]);
+  }, [composition, setSavedComposition, wb.projectId]);
 
   useEffect(() => {
     const viewport = previewViewportRef.current;
@@ -663,6 +722,40 @@ export function PrintComposer() {
       ((event.clientX - rect.left) / rect.width) * mapElement.clientWidth,
       ((event.clientY - rect.top) / rect.height) * mapElement.clientHeight,
     ]);
+    const canvasPoint: [number, number] = [
+      ((event.clientX - rect.left) / rect.width) * mapElement.clientWidth,
+      ((event.clientY - rect.top) / rect.height) * mapElement.clientHeight,
+    ];
+    let feature: Extract<PrintAnnotation, { type: "callout" }>["feature"];
+    if (placementMode.kind === "feature-callout") {
+      const hits = map.queryRenderedFeatures(canvasPoint);
+      const match = hits
+        .map((hit) => ({
+          hit,
+          layer: includedLayers.find(
+            (layer) => String(hit.source) === sourceId(`print-${layer.id}`),
+          ),
+        }))
+        .find(({ layer, hit }) => layer && hit.properties);
+      if (!match?.layer) {
+        toast.error("No selectable feature found here. Turn on the layer and click its shape.");
+        return;
+      }
+      const attributes = printableFeatureAttributes(match.hit.properties);
+      if (Object.keys(attributes).length === 0) {
+        toast.error("This feature does not expose printable attribute fields.");
+        return;
+      }
+      feature = {
+        layerId: match.layer.id,
+        layerName: match.layer.name,
+        ...(typeof match.hit.id === "string" || typeof match.hit.id === "number"
+          ? { featureId: match.hit.id }
+          : {}),
+        attributes,
+        fields: defaultFeatureCalloutFields(attributes),
+      };
+    }
     const item: PrintAnnotation = {
       id: uid(),
       type: "callout",
@@ -670,11 +763,12 @@ export function PrintComposer() {
       lat: lngLat.lat,
       x: lngLat.lng <= map.getCenter().lng ? 8 : 92,
       y: point.y,
-      text: "Location note",
+      text: feature ? feature.layerName : "Location note",
       color: "#b0453a",
       backgroundColor: "#ffffff",
       textColor: "#17221a",
       contentMode: "label",
+      ...(feature ? { feature } : {}),
     };
     const annotations = arrangeCallouts([...composition.annotations, item], map);
     const bounds = map.getBounds();
@@ -684,7 +778,6 @@ export function PrintComposer() {
       frame: { ...composition.frame, x: 8, width: 84 },
     });
     setSelectedId(item.id);
-    setPlacementMode(null);
     window.setTimeout(() => {
       map.resize();
       map.fitBounds(bounds, { padding: 55, maxZoom: map.getZoom(), duration: 450 });
@@ -909,7 +1002,21 @@ export function PrintComposer() {
             icon={<MessageSquareText />}
             label="Callout"
             active={placementMode?.kind === "callout"}
-            onClick={() => setPlacementMode({ kind: "callout" })}
+            onClick={() =>
+              setPlacementMode((current) =>
+                current?.kind === "callout" ? null : { kind: "callout" },
+              )
+            }
+          />
+          <ComposerButton
+            icon={<Tags />}
+            label="Feature callout"
+            active={placementMode?.kind === "feature-callout"}
+            onClick={() =>
+              setPlacementMode((current) =>
+                current?.kind === "feature-callout" ? null : { kind: "feature-callout" },
+              )
+            }
           />
           <ComposerButton icon={<MapPin />} label="Marker" onClick={() => addMarker()} />
           <ComposerButton
@@ -973,6 +1080,9 @@ export function PrintComposer() {
               : "hidden md:block",
           )}
         >
+          <div className="mb-3 rounded-xl bg-secondary/70 p-2 text-[10px] leading-snug text-muted-foreground">
+            Print layout, labels and callouts are saved only for <strong>{wb.projectName}</strong>.
+          </div>
           <h2 className="mb-2 font-semibold">Page</h2>
           <div className="grid grid-cols-2 gap-2">
             <Select
@@ -1376,6 +1486,25 @@ export function PrintComposer() {
             >
               Clear all print additions
             </button>
+            <button
+              onClick={() => {
+                const map = printMapRef.current;
+                const view = map
+                  ? {
+                      center: [map.getCenter().lng, map.getCenter().lat] as [number, number],
+                      zoom: map.getZoom(),
+                      bearing: map.getBearing(),
+                      pitch: map.getPitch(),
+                    }
+                  : undefined;
+                setComposition(defaultComposition(wb.projectName, wb.displayLayers, view));
+                setSelectedId(null);
+                setPlacementMode(null);
+              }}
+              className="col-span-2 rounded-lg border border-destructive/30 px-2 py-2 text-[10px] font-medium text-destructive"
+            >
+              Reset this project’s print setup
+            </button>
           </div>
         </aside>
 
@@ -1383,15 +1512,19 @@ export function PrintComposer() {
           {placementMode && (
             <div className="print-composer-ui sticky top-0 z-50 mx-auto mb-2 w-fit rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-float">
               {placementMode.kind === "callout"
-                ? "Click the map feature or location to label"
-                : placementMode.start
-                  ? "Click the end point"
-                  : "Click the start point"}
+                ? "Click several map locations to add callouts"
+                : placementMode.kind === "feature-callout"
+                  ? "Click visible features to add attribute callouts"
+                  : "start" in placementMode && placementMode.start
+                    ? "Click the end point"
+                    : "Click the start point"}
               <button
                 onClick={() => setPlacementMode(null)}
                 className="ml-3 opacity-80 hover:opacity-100"
               >
-                Cancel
+                {placementMode.kind === "callout" || placementMode.kind === "feature-callout"
+                  ? "Done"
+                  : "Cancel"}
               </button>
             </div>
           )}
@@ -1643,40 +1776,47 @@ export function PrintComposer() {
                   (item): item is Extract<PrintAnnotation, { type: "callout" }> =>
                     item.type === "callout",
                 )
-                .map((item) => (
-                  <button
-                    key={item.id}
-                    data-print-selected={selectedId === item.id ? "true" : undefined}
-                    onClick={() => setSelectedId(item.id)}
-                    onPointerDown={(event) => startBoxDrag(event, item)}
-                    className={cn(
-                      "absolute z-40 w-[15%] -translate-x-1/2 -translate-y-1/2 rounded-md border px-2 py-1.5 text-left shadow-sm",
-                      selectedId === item.id && "ring-2 ring-primary ring-offset-1",
-                    )}
-                    style={{
-                      left: `${item.x}%`,
-                      top: `${item.y}%`,
-                      color: item.textColor,
-                      backgroundColor: item.backgroundColor,
-                      borderColor: item.color,
-                    }}
-                  >
-                    <span className="block text-[clamp(7px,.75vw,11px)] font-semibold leading-tight">
-                      {item.contentMode === "gps"
-                        ? formatDecimalGps(item)
-                        : item.contentMode === "dms"
-                          ? formatDmsGps(item)
-                          : item.text}
-                    </span>
-                    {(item.contentMode === "label-gps" || item.contentMode === "label-dms") && (
-                      <span className="num mt-1 block text-[clamp(6px,.6vw,9px)] opacity-75">
-                        {item.contentMode === "label-dms"
-                          ? formatDmsGps(item)
-                          : formatDecimalGps(item)}
+                .map((item) => {
+                  const labelLines = featureCalloutLines(
+                    item.text,
+                    item.feature?.attributes,
+                    item.feature?.fields,
+                  );
+                  return (
+                    <button
+                      key={item.id}
+                      data-print-selected={selectedId === item.id ? "true" : undefined}
+                      onClick={() => setSelectedId(item.id)}
+                      onPointerDown={(event) => startBoxDrag(event, item)}
+                      className={cn(
+                        "absolute z-40 w-[18%] -translate-x-1/2 -translate-y-1/2 rounded-md border px-2 py-1.5 text-left shadow-sm",
+                        selectedId === item.id && "ring-2 ring-primary ring-offset-1",
+                      )}
+                      style={{
+                        left: `${item.x}%`,
+                        top: `${item.y}%`,
+                        color: item.textColor,
+                        backgroundColor: item.backgroundColor,
+                        borderColor: item.color,
+                      }}
+                    >
+                      <span className="block whitespace-pre-wrap break-words text-[clamp(7px,.75vw,11px)] font-semibold leading-tight">
+                        {item.contentMode === "gps"
+                          ? formatDecimalGps(item)
+                          : item.contentMode === "dms"
+                            ? formatDmsGps(item)
+                            : labelLines.join("\n")}
                       </span>
-                    )}
-                  </button>
-                ))}
+                      {(item.contentMode === "label-gps" || item.contentMode === "label-dms") && (
+                        <span className="num mt-1 block text-[clamp(6px,.6vw,9px)] opacity-75">
+                          {item.contentMode === "label-dms"
+                            ? formatDmsGps(item)
+                            : formatDecimalGps(item)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               {composition.showDate && (
                 <div className="absolute bottom-[2%] right-[5%] text-[clamp(6px,.65vw,9px)] text-slate-500">
                   {new Date().toLocaleDateString()}
@@ -1834,11 +1974,58 @@ export function PrintComposer() {
             )}
             {selected.type === "callout" && (
               <>
-                <Field
-                  label="Callout text"
+                <MultilineField
+                  label={selected.feature ? "Callout heading" : "Callout text"}
                   value={selected.text}
                   onChange={(text) => updateAnnotation(selected.id, { text })}
                 />
+                {selected.feature && (
+                  <div className="mt-2 rounded-lg border border-border p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-semibold">Feature attributes</span>
+                      <span className="max-w-28 truncate text-[9px] text-muted-foreground">
+                        {selected.feature.layerName}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[9px] leading-snug text-muted-foreground">
+                      Choose each field to print on its own line.
+                    </p>
+                    <div className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+                      {Object.keys(selected.feature.attributes)
+                        .sort((a, b) => a.localeCompare(b))
+                        .map((field) => {
+                          const checked = selected.feature?.fields.includes(field) ?? false;
+                          return (
+                            <label
+                              key={field}
+                              className="flex items-start gap-2 rounded-md bg-secondary/70 p-1.5 text-[9px]"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(event) => {
+                                  if (!selected.feature) return;
+                                  const fields = event.target.checked
+                                    ? [...selected.feature.fields, field]
+                                    : selected.feature.fields.filter((item) => item !== field);
+                                  updateAnnotation(selected.id, {
+                                    feature: { ...selected.feature, fields },
+                                  });
+                                }}
+                                className="mt-0.5 accent-primary"
+                              />
+                              <span className="min-w-0">
+                                <strong className="block truncate">{field}</strong>
+                                <span className="block truncate text-muted-foreground">
+                                  {String(selected.feature?.attributes[field] ?? "")}
+                                </span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
                 <label className="mt-2 block">
                   <span className="mb-1 block text-[10px] font-medium text-muted-foreground">
                     Label content
@@ -2021,6 +2208,29 @@ function Field({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="w-full rounded-lg border border-border bg-card px-2 py-1.5 outline-none focus:border-primary"
+      />
+    </label>
+  );
+}
+
+function MultilineField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="mt-2 block">
+      <span className="mb-1 block text-[10px] font-medium text-muted-foreground">{label}</span>
+      <textarea
+        value={value}
+        rows={4}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full resize-y rounded-lg border border-border bg-card px-2 py-1.5 outline-none focus:border-primary"
+        placeholder="Add one or more lines"
       />
     </label>
   );
