@@ -1,5 +1,6 @@
 import { basemapProbeUrl, basemaps, saveBasemapUrlOverride, setBasemapFallback } from "./basemaps";
 import { catalog, retiredCatalog, type CatalogEntry } from "./catalog";
+import { fillBboxPlaceholder } from "./connectionProbe";
 import { normalizeArcgisLayerUrl } from "./arcgis";
 import { getParcelManifest, isTexasParcelSource, TEXAS_PARCEL_URL } from "./texasParcels";
 import type { ConnectionRecoveryHint, GisLayer } from "./types";
@@ -211,7 +212,7 @@ export async function probeConnectionUrl(
       ? `${normalizeArcgisLayerUrl(url)}/query?where=1%3D1&returnCountOnly=true&f=json`
       : /\{z\}|\{x\}|\{y\}/i.test(url)
         ? basemapProbeUrl(url)
-        : url;
+        : fillBboxPlaceholder(url);
     const response = await fetch(target, { signal: timeout.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
     const contentType = response.headers.get("content-type") ?? "";
