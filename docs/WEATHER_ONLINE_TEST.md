@@ -35,6 +35,22 @@ This is an isolated test release of the implemented Weather foundation, Photogra
 - Hosted inspector showed actual SPC issue/valid/retrieval times and explicit below-threshold statements.
 - Browser verification caught two pre-existing NWS observation errors: null measurements became zero and km/h wind values were interpreted as m/s. The follow-up fix rejects missing/unknown units and explicitly normalizes wind/gust units. Regression tests added before redeployment.
 
+## Code-only deployment
+
+Use this when only application code changes and the Worker's secrets stay as they are:
+
+```bash
+node --env-file=.env.weather-staging.local node_modules/vite/bin/vite.js build --mode weather-staging
+node --env-file=.env.weather-staging.local scripts/prepare-weather-test.mjs --code-only
+npx wrangler deploy --config .output/server/wrangler.json
+```
+
+`--code-only` does not need `XWEATHER_CREDENTIAL_ENCRYPTION_KEY` and writes no secrets file; it also
+removes any earlier one from `.output`. It keeps the branch, test database, access enforcement and
+zero-grant checks, refuses a checkout with uncommitted changes, and scans both browser and server
+artifacts for production database references. Before and after deploying, compare secret names with
+`npx wrangler secret list --name landdraft-test`.
+
 ## Reproduction and rollback
 
 Build with the ignored test-only environment, then run `scripts/prepare-weather-test.mjs`. It requires the test branch, exact test database and zero commercial grants. Deploy using the generated `.output/server/wrangler.json` **without** `--secrets-file` until secret transfer is explicitly approved.
