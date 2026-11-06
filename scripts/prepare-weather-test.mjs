@@ -3,18 +3,28 @@ import { execFileSync } from "node:child_process";
 import { resolve, join } from "node:path";
 import {
   TEST_SUPABASE_URL as url,
+  TEST_BRANCH,
   checkTestEnvironment,
   forbiddenArtifactText,
   isCodeOnly,
 } from "./weather-test-preflight.mjs";
 
-const branch = execFileSync("git", ["branch", "--show-current"], { encoding: "utf8" }).trim();
+const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
+const branch = git("branch", "--show-current");
 const env = process.env;
 const codeOnly = isCodeOnly(process.argv);
+const headCommit = git("rev-parse", "HEAD");
+// Asked of the remote, not a local tracking ref, so a stale or moved ref cannot satisfy the check.
+const publishedTestCommit =
+  codeOnly && branch !== TEST_BRANCH
+    ? git("ls-remote", "origin", `refs/heads/${TEST_BRANCH}`).split(/\s/)[0]
+    : undefined;
 const policy = checkTestEnvironment(env, {
   branch,
   codeOnly,
-  sourceStatus: execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }),
+  sourceStatus: git("status", "--porcelain"),
+  headCommit,
+  publishedTestCommit,
 });
 const configPath = resolve(".output/server/wrangler.json");
 const config = JSON.parse(await readFile(configPath, "utf8"));
@@ -73,8 +83,9 @@ await writeFile(
     {
       environment: "test",
       builtAt: new Date().toISOString(),
-      branch,
-      revision: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+      // Either check passing means this commit is the test branch's source.
+      branch: TEST_BRANCH,
+      revision: headCommit,
       scope:
         "LandDraft Weather public-source layers, native radar/rainfall, and versioned storm intensity, trend, confidence, quality and explainability analysis; test beta",
       commercialProvidersEnabled: false,

@@ -9,8 +9,17 @@ const FORBIDDEN_DATABASE_REFERENCES = ["txgbeskieqvvptgtjyou", "ijramwbgxtsigjol
 export const isCodeOnly = (argv) => argv.includes("--code-only");
 
 /** Every requirement for a test deployment, returning the validated provider policy. */
-export function checkTestEnvironment(env, { branch, codeOnly, sourceStatus = "" }) {
-  if (branch !== TEST_BRANCH) throw new Error(`Test deployment requires ${TEST_BRANCH}`);
+export function checkTestEnvironment(
+  env,
+  { branch, codeOnly, sourceStatus = "", headCommit, publishedTestCommit },
+) {
+  // A second checkout cannot hold the test branch itself, so code-only preparation also
+  // accepts the exact commit that branch has published. The default path stays strict.
+  const atPublishedCommit = codeOnly && Boolean(headCommit) && headCommit === publishedTestCommit;
+  if (branch !== TEST_BRANCH && !atPublishedCommit)
+    throw new Error(
+      `Test deployment requires ${TEST_BRANCH}, or for code-only its exact published commit`,
+    );
   if (env.VITE_LANDDRAFT_ACCESS_ENFORCEMENT !== "true")
     throw new Error(
       "Test access controls are active: build and deploy with VITE_LANDDRAFT_ACCESS_ENFORCEMENT=true",

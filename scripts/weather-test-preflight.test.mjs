@@ -74,6 +74,59 @@ test("code-only preparation refuses a checkout that does not match its commit", 
   );
 });
 
+test("code-only preparation accepts another checkout only at the published test commit", () => {
+  const elsewhere = { branch: "claude/example", codeOnly: true };
+  assert.ok(
+    checkTestEnvironment(env, { ...elsewhere, headCommit: "abc", publishedTestCommit: "abc" }),
+  );
+  assert.ok(
+    checkTestEnvironment(env, {
+      ...elsewhere,
+      branch: "",
+      headCommit: "abc",
+      publishedTestCommit: "abc",
+    }),
+  );
+  for (const commits of [
+    { headCommit: "abc", publishedTestCommit: "def" },
+    { headCommit: "abc" },
+    { headCommit: "", publishedTestCommit: "" },
+    { headCommit: undefined, publishedTestCommit: undefined },
+    {},
+  ]) {
+    assert.throws(() => checkTestEnvironment(env, { ...elsewhere, ...commits }), /requires codex/);
+  }
+});
+
+test("a matching commit keeps every other check and does not relax the default path", () => {
+  const matching = {
+    branch: "claude/example",
+    codeOnly: true,
+    headCommit: "abc",
+    publishedTestCommit: "abc",
+  };
+  assert.throws(
+    () => checkTestEnvironment(env, { ...matching, sourceStatus: " M src/server.ts\n" }),
+    /clean checkout/,
+  );
+  assert.throws(
+    () =>
+      checkTestEnvironment(
+        { ...env, VITE_SUPABASE_URL: "https://txgbeskieqvvptgtjyou.supabase.co" },
+        matching,
+      ),
+    /isolated test Supabase/,
+  );
+  assert.throws(
+    () =>
+      checkTestEnvironment(
+        { ...env, XWEATHER_CREDENTIAL_ENCRYPTION_KEY: "k".repeat(32) },
+        { ...matching, codeOnly: false },
+      ),
+    /requires codex/,
+  );
+});
+
 test("artifact scan always covers production databases and adds the key only when present", () => {
   assert.equal(forbiddenArtifactText(env).length, 2);
   assert.ok(forbiddenArtifactText(env).includes("txgbeskieqvvptgtjyou"));

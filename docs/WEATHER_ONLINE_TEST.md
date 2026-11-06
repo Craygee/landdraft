@@ -51,6 +51,11 @@ zero-grant checks, refuses a checkout with uncommitted changes, and scans both b
 artifacts for production database references. Before and after deploying, compare secret names with
 `npx wrangler secret list --name landdraft-test`.
 
+A checkout that cannot hold `codex/landdraft-test` itself, such as a second worktree, may run
+`--code-only` when its clean `HEAD` is exactly the commit that branch has published on `origin`. The
+script asks the remote, so it needs network access and fails closed without it. The default path,
+which handles the encryption key, still requires the branch itself.
+
 ## Reproduction and rollback
 
 Build with the ignored test-only environment, then run `scripts/prepare-weather-test.mjs`. It requires the test branch, exact test database and zero commercial grants. Deploy using the generated `.output/server/wrangler.json` **without** `--secrets-file` until secret transfer is explicitly approved.
