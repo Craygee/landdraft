@@ -75,8 +75,7 @@ export function studyQuietSources(
     ),
   );
   return result.sources.filter(
-    (source) =>
-      source.queryState && source.queryState !== "project-data" && !onSite.has(source.id),
+    (source) => source.queryState && source.queryState !== "project-data" && !onSite.has(source.id),
   );
 }
 

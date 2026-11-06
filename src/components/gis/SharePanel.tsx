@@ -812,12 +812,10 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
                 <h3 className="min-w-0 flex-1 truncate font-semibold">{managedShare.name}</h3>
                 <button
                   onClick={() =>
-                    void navigator.clipboard
-                      .writeText(shareUrl(managedShare.id))
-                      .then(
-                        () => toast.success("Share link copied"),
-                        () => toast.error("Your browser blocked copying the link"),
-                      )
+                    void navigator.clipboard.writeText(shareUrl(managedShare.id)).then(
+                      () => toast.success("Share link copied"),
+                      () => toast.error("Your browser blocked copying the link"),
+                    )
                   }
                   className="rounded-lg p-2 hover:bg-accent"
                   title="Copy secure link"
