@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 
-const id = (n) => `${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`;
+const id = (n) =>
+  `${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`;
 const owner = id(1),
   limited = id(2),
   universal = id(3),
@@ -63,9 +64,8 @@ test("personalized share snapshots reach the right people only", async (t) => {
     ('${universalMember}','${share}',null,'universal@example.test','viewer',null,null);`);
 
   const asUser = async (user, sql) => {
-    const email = (
-      await db.query("select email from auth.users where id=$1", [user])
-    ).rows[0].email;
+    const email = (await db.query("select email from auth.users where id=$1", [user])).rows[0]
+      .email;
     await db.exec("begin; set local role authenticated;");
     try {
       await db.query(
@@ -91,7 +91,11 @@ test("personalized share snapshots reach the right people only", async (t) => {
   assert.equal(await canRead(owner, universalPath), true);
 
   assert.equal(await canRead(limited, memberPath(limitedMember)), true);
-  assert.equal(await canRead(limited, universalPath), false, "limited recipient sees only their copy");
+  assert.equal(
+    await canRead(limited, universalPath),
+    false,
+    "limited recipient sees only their copy",
+  );
   assert.equal(await canRead(limited, memberPath(universalMember)), false);
 
   assert.equal(await canRead(universal, universalPath), true);
@@ -115,5 +119,9 @@ test("personalized share snapshots reach the right people only", async (t) => {
   assert.deepEqual(await visible(stranger), []);
 
   await db.exec(`update public.project_shares set active=false where id='${share}'`);
-  assert.equal(await canRead(limited, memberPath(limitedMember)), false, "closed share stays closed");
+  assert.equal(
+    await canRead(limited, memberPath(limitedMember)),
+    false,
+    "closed share stays closed",
+  );
 });
