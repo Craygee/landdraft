@@ -844,7 +844,6 @@ function ContentsPage({
                   {sectionStatus[result.status].label}
                 </span>
               ) : null}
-              <span className="w-6 text-right text-[#657168]">{index + 3}</span>
             </li>
           );
         })}
@@ -1315,7 +1314,10 @@ function ReportPageHeader({
       <span className="flex items-center gap-2 font-semibold text-[#2f553c]">
         <Check className="size-3.5" /> {workspace.cover.company || "LandDraft Study Area Report"}
       </span>
-      <span>Page {pageNumber}</span>
+      {/* Sections can run past one printed sheet, so a fixed page number would be wrong. */}
+      <span>
+        {pageNumber > 2 ? `Section ${String(pageNumber - 2).padStart(2, "0")}` : "Contents"}
+      </span>
     </header>
   );
 }
