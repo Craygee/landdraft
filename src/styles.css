@@ -647,7 +647,8 @@
     transform: none !important;
   }
 
-  .app-viewport:has(.study-report-print) > header {
+  .app-viewport:has(.study-report-print) > header,
+  .app-viewport:has(.study-report-print) ~ * {
     display: none !important;
   }
 
