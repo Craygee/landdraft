@@ -182,7 +182,7 @@ export function DataDrawer() {
         wb.updateLayer(existing.id, { visible: true });
         wb.setActiveLayer(existing.id);
         toast.success(`${entry.name} is ready`, {
-          description: "The existing topographic overlay was made visible.",
+          description: "The existing map image layer was made visible.",
         });
         setDrawerOpen(false);
         return;
@@ -204,7 +204,8 @@ export function DataDrawer() {
       });
       wb.setActiveLayer(addedLayer.id);
       toast.success(`${entry.name} added`, {
-        description: "The maintained USGS topographic tiles are drawing as a reorderable overlay.",
+        description:
+          "It is drawing as a reorderable map image. It is visual context, not queryable features.",
       });
       setDrawerOpen(false);
       return;
@@ -325,7 +326,11 @@ export function DataDrawer() {
       requiresViewport: true,
       minZoom: effectiveMinZoom,
       ...(entry.id === "tx-parcels" ? { parcelDisplayVersion: 2 } : {}),
-      ...(selectedFields[entry.id]?.length ? { outFields: selectedFields[entry.id] } : {}),
+      ...(selectedFields[entry.id]?.length
+        ? { outFields: selectedFields[entry.id] }
+        : entry.outFields
+          ? { outFields: entry.outFields }
+          : {}),
     };
     const addedLayer = wb.addLayer({
       name: entry.name + (attributeWhere ? " · filtered" : ""),

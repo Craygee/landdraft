@@ -1,5 +1,6 @@
 import { siteConstraintsCatalog } from "./siteConstraintsCatalog.ts";
 import { infrastructureCatalog } from "./infrastructureCatalog.ts";
+import { studyEvidenceCatalog } from "./studyEvidenceCatalog.ts";
 import type { LayerStyle } from "./types.ts";
 import { PIPELINE_COMMODITY_COLORS, TEXAS_RRC_COMMODITY_RULES } from "./pipelineCommodity.ts";
 import {
@@ -34,6 +35,8 @@ export interface CatalogEntry {
   minZoom?: number;
   countyField?: string;
   where?: string;
+  /** Fields to request where a publisher's service cannot answer outFields=*. */
+  outFields?: string[];
   connection: ConnectionType;
   updateCadence: string;
   states: string[] | "US";
@@ -64,6 +67,7 @@ const live = { connection: "live" as const, updateCadence: "Publisher managed" }
 export const catalog: CatalogEntry[] = [
   ...siteConstraintsCatalog,
   ...infrastructureCatalog,
+  ...studyEvidenceCatalog,
   tx({
     id: "tx-parcels",
     name: "Texas Land Parcels — Statewide",

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { catalog, retiredCatalog, searchCatalog } from "./catalog.ts";
+import { studyEvidenceCatalog } from "./studyEvidenceCatalog.ts";
 import { PIPELINE_COMMODITY_COLORS, pipelineCommodityColor } from "./pipelineCommodity.ts";
 import {
   EIA_TRANSMISSION_VOLTAGE_RULES,
@@ -99,6 +100,50 @@ test("ships verified national study-report layers for land cover, soils and haza
   assert.equal(hazards?.agency, "Federal Emergency Management Agency");
   assert.equal(hazards?.requiresViewport, true);
   assert.match(hazards?.url ?? "", /National_Risk_Index_Census_Tracts\/FeatureServer\/0$/);
+});
+
+test("ships land-study evidence with unique IDs, full provenance and usable connections", () => {
+  const ids = catalog.map((entry) => entry.id);
+  assert.equal(new Set(ids).size, ids.length, "catalog IDs are stable and unique");
+  const seen = new Map<string, string>();
+  for (const entry of studyEvidenceCatalog) {
+    assert.ok(entry.url, entry.id);
+    assert.match(entry.url ?? "", /^https:\/\//, entry.id);
+    assert.ok(entry.sourcePage && entry.license && entry.updateCadence, entry.id);
+    assert.ok(entry.keywords.length, entry.id);
+    if (entry.rendering === "raster-tiles")
+      assert.ok(
+        /\{bbox-epsg-3857\}|\/tile\/\{z\}\/\{y\}\/\{x\}$/.test(entry.url ?? ""),
+        `${entry.id} needs a map-image URL template`,
+      );
+    else assert.match(entry.url ?? "", /\/(FeatureServer|MapServer)\/\d+$/, entry.id);
+    const key = `${entry.url}|${entry.where ?? ""}`;
+    assert.equal(seen.get(key), undefined, `${entry.id} duplicates ${seen.get(key)}`);
+    seen.set(key, entry.id);
+  }
+  // No new entry repeats an existing connection under a different name.
+  const existing = new Set(
+    catalog
+      .filter((entry) => !studyEvidenceCatalog.includes(entry))
+      .map((entry) => `${entry.url}|${entry.where ?? ""}`),
+  );
+  assert.deepEqual(
+    studyEvidenceCatalog.filter((entry) => existing.has(`${entry.url}|${entry.where ?? ""}`)),
+    [],
+  );
+
+  const reports = catalog.find((entry) => entry.id === "tx-twdb-well-reports");
+  assert.equal(reports?.outFields?.includes("WellOwner"), false);
+  assert.equal(reports?.outFields?.includes("DateOfWellCompletion"), false);
+
+  const texas = new Set(searchCatalog("", null, ["TX"]).map((entry) => entry.id));
+  assert.ok(texas.has("tx-puc-water-ccn"));
+  assert.equal(texas.has("wv-aml-polygons"), false);
+  assert.ok(texas.has("padus-fee-managers"));
+  const wv = new Set(searchCatalog("", null, ["WV"]).map((entry) => entry.id));
+  assert.ok(wv.has("wv-aml-polygons"));
+  assert.equal(wv.has("tx-puc-water-ccn"), false);
+  assert.ok(searchCatalog("abandoned mine", null, ["WV"]).length >= 3);
 });
 
 test("ships live power, peaker-screen and Texas gas-plant layers with explicit provenance", () => {
