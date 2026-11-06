@@ -2,21 +2,14 @@ import { booleanIntersects } from "@turf/turf";
 import { useId, useMemo, type ReactNode } from "react";
 import type { Feature, Geometry, Position } from "geojson";
 import type { GisLayer } from "@/lib/gis/types";
-import type { StudyReportBoundary } from "@/lib/studyReport/types";
+import { figureFrame, rasterImageUrl, scaleBar } from "@/lib/studyReport/figure";
+import { studyProfileForLayer } from "@/lib/studyReport/sourceProfiles";
+import type { StudyReportBoundary, StudyReportFigureSnapshot } from "@/lib/studyReport/types";
 
 const WIDTH = 760;
 const HEIGHT = 420;
 const PAD = 26;
-
-function projector(bounds: [number, number, number, number]) {
-  const [west, south, east, north] = bounds;
-  const spanX = Math.max(1e-9, east - west);
-  const spanY = Math.max(1e-9, north - south);
-  return (position: Position): [number, number] => [
-    PAD + ((Number(position[0]) - west) / spanX) * (WIDTH - PAD * 2),
-    HEIGHT - PAD - ((Number(position[1]) - south) / spanY) * (HEIGHT - PAD * 2),
-  ];
-}
+const FEATURE_BUDGET = 650;
 
 function linePath(coordinates: Position[], project: (position: Position) => [number, number]) {
   return coordinates
@@ -139,59 +132,62 @@ function geometryOrder(geometry: Geometry) {
   return 3;
 }
 
-function toWebMercator([longitude, latitude]: [number, number]): [number, number] {
-  const limitedLatitude = Math.max(-85.05112878, Math.min(85.05112878, latitude));
-  const x = (longitude * 20037508.342789244) / 180;
-  const y =
-    (Math.log(Math.tan(((90 + limitedLatitude) * Math.PI) / 360)) / (Math.PI / 180)) *
-    (20037508.342789244 / 180);
-  return [x, y];
-}
-
-function rasterImageUrl(layer: GisLayer, bounds: StudyReportBoundary["bounds"]) {
-  if (layer.source.kind !== "raster") return null;
-  const template = layer.source.tiles[0];
-  if (!template?.includes("{bbox-epsg-3857}")) return null;
-  const [west, south, east, north] = bounds;
-  const [minX, minY] = toWebMercator([west, south]);
-  const [maxX, maxY] = toWebMercator([east, north]);
-  return template
-    .replace("{bbox-epsg-3857}", `${minX},${minY},${maxX},${maxY}`)
-    .replace(/([?&])width=256(?=&|$)/i, `$1width=${WIDTH}`)
-    .replace(/([?&])height=256(?=&|$)/i, `$1height=${HEIGHT}`);
-}
-
 export function StudyAreaMapFigure({
   title,
   boundary,
   layers,
+  snapshot,
 }: {
   title: string;
   boundary: StudyReportBoundary;
   layers: GisLayer[];
+  /** Features saved with the run. Older reports fall back to whatever the layer has loaded. */
+  snapshot?: StudyReportFigureSnapshot | undefined;
 }) {
   const clipId = `study-boundary-${useId().replace(/:/g, "")}`;
-  const project = useMemo(() => projector(boundary.bounds), [boundary.bounds]);
+  const frame = useMemo(
+    () =>
+      figureFrame(boundary.bounds, {
+        x: PAD,
+        y: PAD,
+        width: WIDTH - PAD * 2,
+        height: HEIGHT - PAD * 2,
+      }),
+    [boundary.bounds],
+  );
+  const { project } = frame;
   const visible = layers.slice(0, 8);
   const rasterImages = visible.flatMap((layer) => {
-    const url = rasterImageUrl(layer, boundary.bounds);
+    if (layer.source.kind !== "raster") return [];
+    const url = rasterImageUrl(layer.source.tiles[0], boundary.bounds, frame.width, frame.height);
     return url ? [{ layer, url }] : [];
   });
-  const intersecting = visible
-    .flatMap((layer) =>
-      layer.data.features
-        .filter((feature) => intersectsStudyArea(feature, boundary))
-        .map((feature, index) => ({ layer, feature, index })),
-    )
+  const vectorLayers = visible.filter((layer) => layer.source.kind !== "raster");
+  // Every layer gets a share, so a dense polygon source cannot crowd points and lines off the map.
+  const perLayer = Math.floor(FEATURE_BUDGET / Math.max(1, vectorLayers.length));
+  let omitted = 0;
+  const intersecting = vectorLayers
+    .flatMap((layer) => {
+      const saved = snapshot?.features[layer.id];
+      const features = saved ?? layer.data.features.filter((f) => intersectsStudyArea(f, boundary));
+      omitted += Math.max(0, features.length - perLayer);
+      if (saved && saved.length >= 150) omitted += 1;
+      return features.slice(0, perLayer).map((feature, index) => ({ layer, feature, index }));
+    })
     .sort((a, b) =>
       a.feature.geometry && b.feature.geometry
         ? geometryOrder(a.feature.geometry) - geometryOrder(b.feature.geometry)
         : 0,
-    )
-    .slice(0, 650);
+    );
   const geometry = intersecting.flatMap(({ layer, feature, index }) =>
     feature.geometry
-      ? geometryElements(feature.geometry, project, layer.style, `${layer.id}-${index}`)
+      ? geometryElements(
+          feature.geometry,
+          project,
+          // An aquifer or census tract covering the site is not a constraint, so it is outlined.
+          studyProfileForLayer(layer)?.context ? { ...layer.style, fillOpacity: 0 } : layer.style,
+          `${layer.id}-${index}`,
+        )
       : [],
   );
   const boundaryPaths = boundary.data.features.map((feature) =>
@@ -199,6 +195,7 @@ export function StudyAreaMapFigure({
       ? polygonPath(feature.geometry.coordinates, project)
       : feature.geometry.coordinates.map((polygon) => polygonPath(polygon, project)).join(" "),
   );
+  const scale = scaleBar(frame.metersPerUnit, 180);
   return (
     <figure className="m-0 overflow-hidden rounded-xl border border-[#cfd7cc] bg-white">
       <svg
@@ -213,7 +210,7 @@ export function StudyAreaMapFigure({
           </pattern>
           <clipPath id={clipId}>
             {boundaryPaths.map((path, index) => (
-              <path key={`clip-${index}`} d={path} fillRule="evenodd" />
+              <path key={`clip-${index}`} d={path} fillRule="evenodd" clipRule="evenodd" />
             ))}
           </clipPath>
         </defs>
@@ -233,33 +230,32 @@ export function StudyAreaMapFigure({
               fill="#d9ead8"
               fillOpacity="0.28"
               fillRule="evenodd"
-              stroke="#176d3e"
-              strokeWidth="3"
+              stroke="none"
             />
           ))}
           {rasterImages.map(({ layer, url }) => (
             <image
               key={`raster-${layer.id}`}
               href={url}
-              x={PAD}
-              y={PAD}
-              width={WIDTH - PAD * 2}
-              height={HEIGHT - PAD * 2}
+              x={frame.x}
+              y={frame.y}
+              width={frame.width}
+              height={frame.height}
               preserveAspectRatio="none"
               opacity={Math.min(0.9, Math.max(0.15, layer.style.opacity ?? 0.8))}
             />
           ))}
           {geometry}
-          {boundaryPaths.map((path, index) => (
-            <path
-              key={`boundary-outline-${index}`}
-              d={path}
-              fill="none"
-              stroke="#0c5a31"
-              strokeWidth="3"
-            />
-          ))}
         </g>
+        {boundaryPaths.map((path, index) => (
+          <path
+            key={`boundary-outline-${index}`}
+            d={path}
+            fill="none"
+            stroke="#0c5a31"
+            strokeWidth="2.5"
+          />
+        ))}
         <g transform={`translate(${WIDTH - 48} 42)`}>
           <path d="M 0 20 L 10 0 L 20 20" fill="#163b26" />
           <text x="10" y="35" textAnchor="middle" fontSize="14" fontWeight="700" fill="#163b26">
@@ -267,18 +263,29 @@ export function StudyAreaMapFigure({
           </text>
         </g>
         <g transform={`translate(${PAD + 8} ${HEIGHT - PAD - 18})`}>
-          <rect width="92" height="8" fill="#fff" stroke="#24332a" />
-          <rect width="46" height="8" fill="#24332a" />
+          <rect
+            x="-5"
+            y="-20"
+            width={scale.width + 10}
+            height="33"
+            fill="#fff"
+            fillOpacity="0.82"
+          />
+          <rect width={scale.width} height="8" fill="#fff" stroke="#24332a" />
+          <rect width={scale.width / 2} height="8" fill="#24332a" />
+          <text y="-6" fontSize="11" fill="#26382c">
+            {scale.label}
+          </text>
         </g>
-        <text x={PAD + 8} y={HEIGHT - PAD - 24} fontSize="11" fill="#26382c">
-          Relative scale
-        </text>
       </svg>
       <figcaption className="border-t border-[#d9dfd6] px-3 py-2 text-[11px] leading-4 text-[#526157]">
         <strong className="text-[#1e3426]">{title}.</strong> Study boundary: {boundary.name}.
-        Showing only section-specific evidence intersecting the study area (up to 8 layers and 650
-        vector features), clipped to the selected boundary. This screening figure does not replace
-        source-specific maps or field verification.
+        Section-specific features inside the study area only, clipped to the boundary. Nearby
+        features appear in the table, not on this map. Map images are context and are not measured.
+        {omitted
+          ? " Some features are omitted to keep this figure readable; the tables include them."
+          : ""}{" "}
+        This screening figure does not replace source-specific maps or field verification.
       </figcaption>
       {visible.length ? (
         <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pb-3 text-[10px] text-[#526157]">

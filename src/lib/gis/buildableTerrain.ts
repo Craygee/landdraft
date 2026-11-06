@@ -220,6 +220,41 @@ export function maskPolygons(mask: Uint8Array, width: number, height: number): n
     ? [result.coordinates as number[][][]]
     : (result.coordinates as number[][][][]);
 }
+/**
+ * Percent grade at one cell: the larger of the Horn 3×3 gradient and the steepest drop to any of
+ * the eight neighbours. Null when the cell or a neighbour has no data or lies outside the grid.
+ */
+export function gradePercentAt(
+  z: (number | null)[],
+  w: number,
+  h: number,
+  x: number,
+  y: number,
+  dx: number,
+  dy: number,
+): number | null {
+  if (x < 1 || y < 1 || x >= w - 1 || y >= h - 1) return null;
+  for (let yy = -1; yy <= 1; yy++)
+    for (let xx = -1; xx <= 1; xx++) {
+      const value = z[(y + yy) * w + x + xx];
+      if (value === null || value === undefined || !Number.isFinite(value)) return null;
+    }
+  const at = (xx: number, yy: number) => z[(y + yy) * w + x + xx]!;
+  const dzdx =
+      (at(1, -1) + 2 * at(1, 0) + at(1, 1) - at(-1, -1) - 2 * at(-1, 0) - at(-1, 1)) / (8 * dx),
+    dzdy =
+      (at(-1, 1) + 2 * at(0, 1) + at(1, 1) - at(-1, -1) - 2 * at(0, -1) - at(1, -1)) / (8 * dy);
+  let slope = Math.hypot(dzdx, dzdy) * 100;
+  for (let yy = -1; yy <= 1; yy++)
+    for (let xx = -1; xx <= 1; xx++)
+      if (xx || yy)
+        slope = Math.max(
+          slope,
+          (Math.abs(at(xx, yy) - at(0, 0)) / Math.hypot(xx * dx, yy * dy)) * 100,
+        );
+  return slope;
+}
+
 export function terrainRules(input: BuildableInput, grid: TerrainGrid): BuildableRule[] {
   const s = input.automation!.terrain;
   validateTerrainSettings(s);
@@ -266,19 +301,7 @@ export function terrainRules(input: BuildableInput, grid: TerrainGrid): Buildabl
         missing++;
         continue;
       }
-      const at = (xx: number, yy: number) => z[(y + yy) * w + x + xx]!;
-      const dzdx =
-          (at(1, -1) + 2 * at(1, 0) + at(1, 1) - at(-1, -1) - 2 * at(-1, 0) - at(-1, 1)) / (8 * dx),
-        dzdy =
-          (at(-1, 1) + 2 * at(0, 1) + at(1, 1) - at(-1, -1) - 2 * at(0, -1) - at(1, -1)) / (8 * dy);
-      let slope = Math.hypot(dzdx, dzdy) * 100;
-      for (let yy = -1; yy <= 1; yy++)
-        for (let xx = -1; xx <= 1; xx++)
-          if (xx || yy)
-            slope = Math.max(
-              slope,
-              (Math.abs(at(xx, yy) - at(0, 0)) / Math.hypot(xx * dx, yy * dy)) * 100,
-            );
+      const slope = gradePercentAt(z, w, h, x, y, dx, dy)!;
       const relief = high - low;
       valid++;
       known[i] = 1;
