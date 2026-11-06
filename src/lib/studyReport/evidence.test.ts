@@ -20,6 +20,7 @@ import {
   studyBoundaryFromLayer,
   studyBoundaryFromSelection,
   studyEvidenceSignature,
+  studyQuietSources,
 } from "./model.ts";
 import { refreshStudyLayers, STUDY_REFRESH_LAYER_LIMIT } from "./refresh.ts";
 import { STUDY_SOURCE_PROFILES, studySectionsForLayer } from "./sourceProfiles.ts";
@@ -289,6 +290,30 @@ test("separates on-site from nearby features and labels the search distance", ()
   // About 1,000 m east of the boundary, which is about 0.58 mi.
   assert.ok(Math.abs((analysis.nearby?.nearestMiles ?? 0) - 0.58) < 0.03);
   assert.deepEqual(analysis.attributes[0]?.values, [{ value: "solar", count: 1 }]);
+});
+
+test("Study Area does not call a source empty when another section found it on site", () => {
+  const workspace = workspaceFor([-100, 32, -99.99, 32.01]);
+  const plants = remote("p", "us-power-plants-eia", "Power plants", [
+    point(-99.995, 32.005, { Plant_Name: "Inside" }),
+  ]);
+  const emptyPlants = remote("q", "us-power-plants-eia", "Far plants", [
+    point(-99.5, 32.005, { Plant_Name: "Far" }),
+  ]);
+  const result = analyzeStudyReport({
+    workspace,
+    layers: [plants, emptyPlants],
+    records: emptyProjectRecords(),
+    layerStatuses: [
+      { layerId: "p", state: "complete", nearbyMiles: 5 },
+      { layerId: "q", state: "complete", nearbyMiles: 5 },
+    ],
+  });
+  const quiet = studyQuietSources(section(result, "study-area"), result.currentRun);
+  assert.deepEqual(
+    quiet.map((source) => source.id),
+    ["q"],
+  );
 });
 
 test("a feature in the boundary hole is nearby, not on site, and line length excludes the hole", () => {

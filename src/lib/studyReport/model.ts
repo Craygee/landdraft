@@ -39,6 +39,7 @@ import type {
   StudyReportSectionAnalysis,
   StudyReportSectionConfig,
   StudyReportSectionId,
+  StudyReportRun,
   StudyReportSectionResult,
   StudyReportSourceRecommendation,
   StudyReportSourceReference,
@@ -59,6 +60,25 @@ export const STUDY_REPORT_CAPABILITIES: StudyReportCapability[] = [
   "studyReport.publicData",
   "studyReport.export",
 ];
+
+// On-site counts live on the section that analyzed each source, and the Study Area
+// section lists every source without analyzing any, so check the whole run.
+export function studyQuietSources(
+  result: StudyReportSectionResult,
+  run: StudyReportRun | undefined,
+): StudyReportSourceReference[] {
+  const onSite = new Set(
+    (run?.sections ?? []).flatMap((section) =>
+      (section.analysis?.layers ?? [])
+        .filter((layer) => layer.featureCount > 0)
+        .map((layer) => layer.layerId),
+    ),
+  );
+  return result.sources.filter(
+    (source) =>
+      source.queryState && source.queryState !== "project-data" && !onSite.has(source.id),
+  );
+}
 
 export const STUDY_REPORT_SECTIONS: Array<{ id: StudyReportSectionId; title: string }> = [
   { id: "executive-summary", title: "Executive Summary" },

@@ -46,6 +46,7 @@ import {
   studyEvidenceSignature,
   studyPercent,
   studyQueryStateLabel,
+  studyQuietSources,
   type StudyMeasurementResult,
 } from "@/lib/studyReport/model";
 import { refreshStudyLayers } from "@/lib/studyReport/refresh";
@@ -903,14 +904,7 @@ function ReportSectionPage({
   const buildable = buildableLayer ? snapshotFromLayer(buildableLayer) : null;
   const statusFor = (layerId: string) =>
     workspace.currentRun?.layerStatuses?.find((status) => status.layerId === layerId);
-  const quietSources = result.sources.filter(
-    (source) =>
-      source.queryState &&
-      source.queryState !== "project-data" &&
-      !result.analysis?.layers.some(
-        (layer) => layer.layerId === source.id && layer.featureCount > 0,
-      ),
-  );
+  const quietSources = studyQuietSources(result, workspace.currentRun);
   const showMap = Boolean(
     workspace.boundary &&
     (mappedLayers.length || config.id === "study-area") &&
