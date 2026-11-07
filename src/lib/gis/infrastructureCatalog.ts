@@ -20,7 +20,7 @@ const usgsSurface = (
   agency: "U.S. Geological Survey — The National Map",
   url: `https://carto.nationalmap.gov/arcgis/rest/services/${service}/MapServer/${layer}`,
   sourcePage: `https://carto.nationalmap.gov/arcgis/rest/services/${service}/MapServer`,
-  keywords: [...keywords, "surface features", "data center", "datacenter", "site planning"],
+  keywords: [...keywords, "usgs", "national map"],
   states: "US",
   requiresViewport: true,
   minZoom,
@@ -115,7 +115,7 @@ export const infrastructureCatalog: CatalogEntry[] = [
     "line",
     "Transportation",
     "Local road centerlines for site access screening. Mapped roads do not establish legal access, pavement quality or truck capacity.",
-    ["road", "access", "construction"],
+    ["road", "local road", "access"],
   ),
   usgsSurface(
     "usgs-runways",
