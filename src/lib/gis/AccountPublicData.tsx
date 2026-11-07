@@ -170,3 +170,9 @@ export function useAccountPublicData() {
   if (!value) throw new Error("Missing account public data provider");
   return value;
 }
+
+/** Like useAccountPublicData, but null on routes that have no account provider. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useOptionalAccountPublicData() {
+  return useContext(Context);
+}

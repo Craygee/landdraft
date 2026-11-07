@@ -49,6 +49,9 @@ import { useAuth } from "@/lib/auth";
 import { LANDDRAFT_APP_VERSION, projectVersionLabel } from "@/lib/appVersion";
 import { downloadSharedState, shareStore, type MapShare, type ShareRole } from "./sharing";
 import { DEFAULT_BASEMAP_ID } from "./basemaps";
+import { catalog } from "./catalog";
+import { suggestedPointIconStyle, type PointIconPreferences } from "./defaultPointIcons";
+import { useOptionalAccountPublicData } from "./AccountPublicData";
 import { createCoreLayerGroups, ensureCoreLayerGroups } from "./projectGroups";
 import { normalizeLayerData, normalizeLayerStyle } from "./layerNormalization";
 import { dedupePublicDataLayers } from "./displayLayers";
@@ -605,6 +608,9 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<WorkbenchState>(initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const accountData = useOptionalAccountPublicData();
+  const pointIconPrefsRef = useRef<PointIconPreferences>({});
+  pointIconPrefsRef.current = accountData?.config.pointIcons ?? {};
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapViewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipNextAutosave = useRef(true);
@@ -746,7 +752,17 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       const style =
         input.source.kind === "derived"
           ? derivedStyle(input.source.sourceLayerId, existing, input.style)
-          : { ...defaultStyle(Math.floor(Math.random() * 6)), ...input.style };
+          : {
+              ...defaultStyle(Math.floor(Math.random() * 6)),
+              ...suggestedPointIconStyle(
+                input,
+                pointIconPrefsRef.current,
+                "catalogId" in input.source && input.source.catalogId
+                  ? catalog.find((entry) => entry.id === input.source.catalogId)?.geometry
+                  : undefined,
+              ),
+              ...input.style,
+            };
       const layer: GisLayer = {
         id: uid(),
         name: input.name,

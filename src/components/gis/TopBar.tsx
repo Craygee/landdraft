@@ -42,7 +42,7 @@ import { ProjectAreaControl } from "./ProjectAreaControl";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { LandDraftTools } from "./LandDraftTools";
 import { ButtonHelpSettings } from "@/components/ui/ButtonHelpSettings";
-import { PublicDataAccountSettings } from "./PublicDataAccountControls";
+import { DefaultPointIconSettings, PublicDataAccountSettings } from "./PublicDataAccountControls";
 
 export function TopBar({
   onTogglePanel,
@@ -579,6 +579,9 @@ export function TopBar({
             <ButtonHelpSettings compact />
             <div className="mt-3">
               <PublicDataAccountSettings />
+            </div>
+            <div className="mt-3">
+              <DefaultPointIconSettings />
             </div>
           </div>
 

@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useAccountPublicData } from "@/lib/gis/AccountPublicData";
 import { catalog, retiredCatalog } from "@/lib/gis/catalog";
+import { builtInPointIcon, pointIconTypes } from "@/lib/gis/defaultPointIcons";
+import { markerIcons } from "@/lib/gis/markerIcons";
 import { probeConnectionUrl } from "@/lib/gis/connectionHealth";
 import {
   filterAccountServices,
@@ -64,6 +66,82 @@ export function PublicDataAccountSettings() {
           </button>
         </p>
       )}
+    </section>
+  );
+}
+
+export function DefaultPointIconSettings() {
+  const account = useAccountPublicData();
+  const [busy, setBusy] = useState(false);
+  const prefs = account.config.pointIcons;
+  const save = async (change: (current: Record<string, string>) => Record<string, string>) => {
+    setBusy(true);
+    try {
+      await account.update((current) => ({ ...current, pointIcons: change(current.pointIcons) }));
+      toast.success("Default icons saved to your account");
+    } catch (error) {
+      report(error);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const categories = Array.from(new Set(markerIcons.map((icon) => icon.category)));
+  return (
+    <section className="space-y-2 rounded-xl border border-border p-3 text-xs">
+      <strong>Default point icons</strong>
+      <p className="text-muted-foreground">
+        When a layer with points is added, LandDraft picks a fitting icon from its name. Change the
+        default for a layer type here and it applies to new layers across the app. Layers already on
+        a map keep their current icon.
+      </p>
+      <div className="max-h-64 space-y-1 overflow-y-auto">
+        {pointIconTypes.map((type) => {
+          const overridden = Object.prototype.hasOwnProperty.call(prefs, type.id);
+          const value = overridden ? (prefs[type.id] ?? "") : (builtInPointIcon(type.id) ?? "");
+          return (
+            <div key={type.id} className="flex items-center gap-2">
+              <label htmlFor={`default-icon-${type.id}`} className="min-w-0 flex-1 truncate">
+                {type.label}
+              </label>
+              <select
+                id={`default-icon-${type.id}`}
+                disabled={!account.ready || busy}
+                value={value}
+                onChange={(event) =>
+                  void save((current) => ({ ...current, [type.id]: event.target.value }))
+                }
+                className="w-40 rounded border bg-background p-1 text-base"
+              >
+                <option value="">Circle only</option>
+                {categories.map((category) => (
+                  <optgroup key={category} label={category}>
+                    {markerIcons
+                      .filter((icon) => icon.category === category)
+                      .map((icon) => (
+                        <option key={icon.id} value={icon.symbol}>
+                          {icon.symbol} {icon.label}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+              </select>
+              <button
+                disabled={!overridden || busy}
+                className="underline disabled:opacity-40"
+                onClick={() =>
+                  void save((current) => {
+                    const next = { ...current };
+                    delete next[type.id];
+                    return next;
+                  })
+                }
+              >
+                Reset
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
