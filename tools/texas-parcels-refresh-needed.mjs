@@ -9,7 +9,16 @@ const sourceChanged =
   current?.sourceEtag !== latest.etag || current?.collectionId !== latest.collection.collection_id;
 const searchBackfill =
   !sourceChanged && (current?.search?.status !== "ready" || current?.search?.schemaVersion !== 2);
-const mode = sourceChanged ? "full" : searchBackfill ? "search-only" : "unchanged";
+// Zoomed-out overview tiers (tools/texas-parcels-overview.py) can be added to a hosted version.
+const overviewBackfill =
+  !sourceChanged && !searchBackfill && current?.overview?.schemaVersion !== 1;
+const mode = sourceChanged
+  ? "full"
+  : searchBackfill
+    ? "search-only"
+    : overviewBackfill
+      ? "overview-only"
+      : "unchanged";
 const needed = mode !== "unchanged";
 if (process.env.GITHUB_OUTPUT)
   await appendFile(process.env.GITHUB_OUTPUT, `needed=${needed}\nmode=${mode}\n`);
@@ -18,5 +27,7 @@ console.log(
     ? "New public archive requires spatial and search indexing"
     : mode === "search-only"
       ? "Hosted archive requires the statewide attribute-search backfill"
-      : "Publisher archive and search index are current",
+      : mode === "overview-only"
+        ? "Hosted archive requires the zoomed-out overview backfill"
+        : "Publisher archive, search index and overview are current",
 );

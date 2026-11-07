@@ -22,4 +22,4 @@ if (
 const folder = join(store, "index", version);
 await mkdir(folder, { recursive: true });
 await writeFile(join(folder, "manifest.json"), JSON.stringify(hosted, null, 2));
-console.log(`Prepared search-only backfill for parcel version ${version}`);
+console.log(`Prepared backfill from the hosted manifest for parcel version ${version}`);

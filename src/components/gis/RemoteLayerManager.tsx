@@ -136,7 +136,7 @@ export function RemoteLayerManager() {
                 pageSize: source.catalogId === "usgs-contours" ? 200 : 2_000,
                 maxTotalFeatures:
                   isTexasParcelSource(source.url) && mapZoom < 12
-                    ? 4000
+                    ? 15000
                     : viewportFeatureBudget(mapZoom),
                 parcelDisplayZoom: mapZoom,
                 maxAllowableOffset: tuning.maxAllowableOffset,

@@ -52,3 +52,9 @@ The weekly workflow was manually executed successfully: https://github.com/Crayg
 Live application release commit: `be2edcd2` (Publish LandDraft 0.9.160 public Texas parcels), pushed normally to the deployment repository main branch after validation. Browser was signed out, so authenticated desktop/iPad/mobile UI verification remains outstanding. No database migrations were applied for this statewide implementation.
 
 Production verification: landdraft.net publicly serves version 0.9.160+be2edcd2 in its Workbench and RemoteLayerManager bundles. Lovable production deployment d5e70c27-62d3-4d03-b3ac-5f4472fa7170 was requested after the synced build was ready.
+
+## Zoomed-out overview tiers (November 2026)
+
+A zoom-9 view holds roughly 90,000 to 1.3 million parcels; reading them from the full parts took 8 to 50 seconds for the index alone. `tools/texas-parcels-overview.py` builds overview FlatGeobuf files in the same version folder: `overview-0080.fgb` (parcels of 80+ acres, simplified to 25 m, zoom 8 to 10) and `overview-0005.fgb` (5+ acres, simplified to 6 m, zoom 10 to 12). They keep `OBJECTID`, `Prop_ID`, `GEO_ID`, `OWNER_NAME`, `COUNTY`, `FIPS` and `LD_ACRES` (ground acres). The manifest lists them under `overview` (schema 1); the browser reads a tier with the same bounding-box byte-range query as a part and keeps the largest parcels if a view is over budget. Full parts remain the source from zoom 12.
+
+`tools/texas-parcels-refresh-needed.mjs` reports `overview-only` when the hosted version has no overview; the workflow then reuses the hosted manifest, builds only the overview, and uploads the tiers before republishing the manifest (`PARCEL_UPLOAD_MODE`). The parcel Worker serves and accepts `overview-NNNN.fgb` names. Clients without overview support ignore the field.
