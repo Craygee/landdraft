@@ -25,7 +25,10 @@ test("source-only entries say they open a source page, not that they download or
   for (const entry of sourceOnly) {
     const tags = catalogEntryTags(entry);
     assert.equal(tags.find((tag) => tag.kind === "connection")?.label, "source page only");
-    assert.equal(tags.some((tag) => tag.kind === "access" || tag.kind === "zoom"), false);
+    assert.equal(
+      tags.some((tag) => tag.kind === "access" || tag.kind === "zoom"),
+      false,
+    );
   }
 });
 
