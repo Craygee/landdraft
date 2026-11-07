@@ -69,6 +69,7 @@ const placementOptions = (
     return [
       ...common,
       { value: "follow-line", label: "Follow the line" },
+      { value: "inline", label: "In the line (line breaks under label)" },
       { value: "horizontal", label: "Horizontal at line center" },
       { value: "above", label: "Above the line" },
       { value: "below", label: "Below the line" },
@@ -450,7 +451,9 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
             </div>
             <p className="text-[9px] text-muted-foreground">
               {labelGeometry === "line"
-                ? "Line labels can follow bends or stay horizontal."
+                ? s.labelPlacement === "inline"
+                  ? "The label sits in the line on a straight stretch, centered, and the line is cut away under it. Nothing is painted behind the text."
+                  : "Line labels can follow bends, sit in the line, or stay horizontal."
                 : labelGeometry === "polygon"
                   ? "Polygon labels use the feature center and can be offset around it."
                   : labelGeometry === "point"

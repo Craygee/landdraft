@@ -16,6 +16,7 @@ const placements: { value: LabelPlacement; label: string }[] = [
   { value: "left", label: "Left" },
   { value: "right", label: "Right" },
   { value: "follow-line", label: "Follow line features" },
+  { value: "inline", label: "In line features (line breaks under label)" },
   { value: "horizontal", label: "Horizontal on lines" },
 ];
 

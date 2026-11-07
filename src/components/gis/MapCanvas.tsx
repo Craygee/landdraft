@@ -53,6 +53,14 @@ import {
 } from "@/lib/gis/mapStyle";
 import { composeLabel } from "@/lib/gis/labels";
 import { buildParcelLabels, isParcelLayer, parcelLabelSourceId } from "@/lib/gis/parcelDisplay";
+import {
+  buildLineChains,
+  lineGapSourceId,
+  lineLabelMode,
+  lineLabelSourceId,
+  type LineChain,
+} from "@/lib/gis/lineLabels";
+import { syncLineLabelSources } from "@/lib/gis/lineLabelSources";
 import type { GisLayer } from "@/lib/gis/types";
 import {
   formatArea,
@@ -94,6 +102,18 @@ interface PreparedCacheEntry {
   fc: FeatureCollection;
   labelFc: FeatureCollection | null;
 }
+
+// Joined line chains are derived from the prepared label data and reused until it changes.
+const lineChainCache = new WeakMap<FeatureCollection, LineChain[]>();
+const chainsFor = (fc: FeatureCollection) => {
+  let chains = lineChainCache.get(fc);
+  if (!chains) {
+    chains = buildLineChains(fc);
+    lineChainCache.set(fc, chains);
+  }
+  return chains;
+};
+const lineLabelModeOf = (layer: GisLayer) => lineLabelMode(layer, primaryLabelGeometry(layer));
 
 type VertexEditMode = "move" | "add" | "delete";
 type DraftVertexMode = "add" | "delete";
@@ -184,6 +204,7 @@ export function MapCanvas() {
   const styledBasemapRef = useRef(wb.basemapId);
   const preparedCacheRef = useRef(new Map<string, PreparedCacheEntry>());
   const sourcePayloadRef = useRef(new Map<string, FeatureCollection>());
+  const lineLabelPayloadRef = useRef(new Map<string, { fc: FeatureCollection; key: string }>());
   const styleSignatureRef = useRef(new Map<string, string>());
   const orderSignatureRef = useRef("");
   const renderErrorSignatureRef = useRef("");
@@ -429,6 +450,8 @@ export function MapCanvas() {
           prepared.flatMap((p) => [
             sourceId(p.layer.id),
             ...(p.labelFc ? [parcelLabelSourceId(p.layer.id)] : []),
+            ...(lineLabelModeOf(p.layer) ? [lineLabelSourceId(p.layer.id)] : []),
+            ...(lineLabelModeOf(p.layer) === "inline" ? [lineGapSourceId(p.layer.id)] : []),
           ]),
         );
         let rebuiltLayers = false;
@@ -513,6 +536,30 @@ export function MapCanvas() {
           if (layer.source.kind !== "image" && layer.source.kind !== "raster")
             sourcePayloadRef.current.set(sid, fc);
 
+          const lineMode = lineLabelModeOf(layer);
+          if (lineMode) {
+            const labelSid = lineLabelSourceId(layer.id);
+            const previous = lineLabelPayloadRef.current.get(labelSid);
+            const key = JSON.stringify([
+              lineMode,
+              layer.style.labelSize,
+              layer.style.labelFont,
+              layer.style.labelScaleWithZoom,
+              layer.style.labelMinZoom,
+              layer.style.labelMaxZoom,
+            ]);
+            const needsGap = lineMode === "inline" && !map.getSource(lineGapSourceId(layer.id));
+            if (
+              previous?.fc !== fc ||
+              previous.key !== key ||
+              needsGap ||
+              !map.getSource(labelSid)
+            ) {
+              syncLineLabelSources(map, layer.id, layer, fc, chainsFor(fc), lineMode);
+              lineLabelPayloadRef.current.set(labelSid, { fc, key });
+            }
+          }
+
           const sentinelLayerId =
             layer.source.kind === "image"
               ? imageId(layer.id)
@@ -582,6 +629,28 @@ export function MapCanvas() {
       if (retryTimer) clearTimeout(retryTimer);
     };
   }, [prepared, ready, styleRevision, setLayerRenderErrors]);
+
+  // Inline line labels are cut into the line for the current zoom and rotation.
+  useEffect(() => {
+    const map = mapObj.current;
+    if (!map || !ready) return;
+    const inline = prepared.filter((p) => lineLabelModeOf(p.layer) === "inline");
+    if (!inline.length) return;
+    const refresh = () => {
+      for (const { layer, fc } of inline) {
+        if (!layer.visible || !map.getSource(lineGapSourceId(layer.id))) continue;
+        try {
+          syncLineLabelSources(map, layer.id, layer, fc, chainsFor(fc), "inline");
+        } catch (error) {
+          console.warn("[map] inline labels could not refresh", error);
+        }
+      }
+    };
+    map.on("moveend", refresh);
+    return () => {
+      map.off("moveend", refresh);
+    };
+  }, [prepared, ready]);
 
   useEffect(() => {
     const map = mapObj.current;
