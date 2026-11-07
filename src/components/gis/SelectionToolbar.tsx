@@ -191,7 +191,7 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
       centered
       enabled={false}
       className={cn(
-        "panel-surface pointer-events-auto absolute left-1/2 z-[60] w-[min(94vw,760px)] rounded-2xl p-2 shadow-float",
+        "panel-surface pointer-events-auto absolute left-1/2 z-[60] w-[min(calc(100%-1.5rem),760px)] rounded-2xl p-2 shadow-float",
         mobile
           ? "bottom-[calc(4.5rem+env(safe-area-inset-bottom))] max-h-[45dvh] overflow-y-auto"
           : "bottom-4",
@@ -223,7 +223,7 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
         </button>
       </div>
 
-      <div className="mt-2 flex gap-1 overflow-x-auto pb-0.5">
+      <div className="mt-2 flex gap-1 overflow-x-auto pb-0.5 pr-8 [mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)]">
         <Action
           icon={<CopyPlus />}
           label={selected.length > 1 ? "New layer from selection" : "New layer"}

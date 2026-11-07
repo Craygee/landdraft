@@ -107,15 +107,25 @@ function WorkbenchShell() {
         const rect = el.getBoundingClientRect();
         if (rect.height > 0) bottom = Math.max(bottom, rect.bottom - top);
       }
-      if (bottom > 0) main.style.setProperty("--map-top-inset", `${Math.round(bottom + 12)}px`);
-      else main.style.removeProperty("--map-top-inset");
+      const root = document.documentElement;
+      if (bottom > 0) {
+        main.style.setProperty("--map-top-inset", `${Math.round(bottom + 12)}px`);
+        // Viewport position, for windows portaled outside the map area.
+        root.style.setProperty("--map-top-offset", `${Math.round(top + bottom + 12)}px`);
+      } else {
+        main.style.removeProperty("--map-top-inset");
+        root.style.removeProperty("--map-top-offset");
+      }
     };
     update();
     const observer = new ResizeObserver(update);
     observer.observe(main);
     if (searchBar) observer.observe(searchBar);
     if (toolbar) observer.observe(toolbar);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty("--map-top-offset");
+    };
   }, [wb.projectReady, wb.canEditProject, wb.canSearchMap]);
 
   if (!wb.projectReady) return <WorkspaceLoading />;
