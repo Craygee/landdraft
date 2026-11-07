@@ -874,3 +874,11 @@ body:has(.mobile-map-mode .elevation-profile-panel, .mobile-field-mode .elevatio
   body:has(.buildable-area-panel) .maplibregl-ctrl-bottom-left,
   body:has(.buildable-area-panel) .maplibregl-ctrl-bottom-right { display: none; }
 }
+
+/* While the feature attributes window is open on desktop it occupies the
+   right edge, so the legend button moves to its left instead of hiding under it. */
+@media (min-width: 640px) {
+  body:has([aria-label="Selected map item attributes"]) .map-legend-anchor {
+    right: calc(min(430px, 100vw - 2rem) + 1.5rem);
+  }
+}
