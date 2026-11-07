@@ -1,3 +1,4 @@
+import { normalizePointIconPreferences, type PointIconPreferences } from "./defaultPointIcons.ts";
 export interface AccountService {
   id: string;
   name: string;
@@ -19,6 +20,8 @@ export interface PublicDataAccount {
   health: Record<string, SourceHealth>;
   overrides: Record<string, string>;
   restoredDefaults: Record<string, boolean>;
+  /** Account-wide default icon per point-layer type (see defaultPointIcons.ts). */
+  pointIcons: PointIconPreferences;
 }
 export const emptyPublicDataAccount = (): PublicDataAccount => ({
   version: 1,
@@ -28,6 +31,7 @@ export const emptyPublicDataAccount = (): PublicDataAccount => ({
   health: {},
   overrides: {},
   restoredDefaults: {},
+  pointIcons: {},
 });
 export function recordSourceHealth(
   previous: SourceHealth | undefined,
@@ -73,6 +77,7 @@ export function normalizePublicDataAccount(value: unknown): PublicDataAccount {
     health: candidate.health ?? {},
     overrides: candidate.overrides ?? {},
     restoredDefaults: candidate.restoredDefaults ?? {},
+    pointIcons: normalizePointIconPreferences(candidate.pointIcons),
   };
 }
 

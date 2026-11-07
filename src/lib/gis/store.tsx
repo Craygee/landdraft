@@ -49,6 +49,9 @@ import { useAuth } from "@/lib/auth";
 import { LANDDRAFT_APP_VERSION, projectVersionLabel } from "@/lib/appVersion";
 import { downloadSharedState, shareStore, type MapShare, type ShareRole } from "./sharing";
 import { DEFAULT_BASEMAP_ID } from "./basemaps";
+import { catalog } from "./catalog";
+import { suggestedPointIconStyle, type PointIconPreferences } from "./defaultPointIcons";
+import { useOptionalAccountPublicData } from "./AccountPublicData";
 import { createCoreLayerGroups, ensureCoreLayerGroups } from "./projectGroups";
 import { normalizeLayerData, normalizeLayerStyle } from "./layerNormalization";
 import { dedupePublicDataLayers } from "./displayLayers";
@@ -180,6 +183,11 @@ const blankProjectState = (
     enabledSubprojectIds: [],
     records: emptyProjectRecords(),
   };
+};
+
+const catalogGeometryFor = (source: LayerSource) => {
+  const catalogId = "catalogId" in source ? source.catalogId : undefined;
+  return catalogId ? catalog.find((entry) => entry.id === catalogId)?.geometry : undefined;
 };
 
 const normalizedLayer = (layer: GisLayer, index: number): GisLayer => {
@@ -616,6 +624,9 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<WorkbenchState>(initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const accountData = useOptionalAccountPublicData();
+  const pointIconPrefsRef = useRef<PointIconPreferences>({});
+  pointIconPrefsRef.current = accountData?.config.pointIcons ?? {};
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapViewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipNextAutosave = useRef(true);
@@ -757,7 +768,15 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       const style =
         input.source.kind === "derived"
           ? derivedStyle(input.source.sourceLayerId, existing, input.style)
-          : { ...defaultStyle(Math.floor(Math.random() * 6)), ...input.style };
+          : {
+              ...defaultStyle(Math.floor(Math.random() * 6)),
+              ...suggestedPointIconStyle(
+                input,
+                pointIconPrefsRef.current,
+                catalogGeometryFor(input.source),
+              ),
+              ...input.style,
+            };
       const layer: GisLayer = {
         id: uid(),
         name: input.name,
