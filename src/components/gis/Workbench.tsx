@@ -149,7 +149,7 @@ function WorkbenchShell() {
         <main ref={mainRef} className="relative min-w-0 flex-1">
           <MapCanvas />
           <FeatureAttributesWindow />
-          <div className="absolute right-3 top-[calc(var(--map-top-inset,4rem)+0.5rem)] z-30">
+          <div className="map-legend-anchor absolute right-3 top-[calc(var(--map-top-inset,4rem)+0.5rem)] z-30">
             <MapLegendControl />
           </div>
           {wb.canEditProject && <SelectionToolbar />}

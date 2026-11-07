@@ -121,6 +121,16 @@ export function TopBar({
       )
         return;
       closeAll();
+      // A click that only dismisses a menu should not also select or draw on
+      // the map underneath, so swallow the click that follows this press.
+      if (target.closest(".maplibregl-canvas-container")) {
+        const swallow = (clickEvent: MouseEvent) => {
+          clickEvent.stopPropagation();
+          clickEvent.preventDefault();
+        };
+        document.addEventListener("click", swallow, { capture: true, once: true });
+        window.setTimeout(() => document.removeEventListener("click", swallow, true), 600);
+      }
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeAll();
