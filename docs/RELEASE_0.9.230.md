@@ -15,7 +15,7 @@
   larger, between 10 and 12 parcels of 5 acres and larger, both with simplified outlines. Full
   parcel detail is unchanged from zoom 12.
 - If a zoomed-out view still holds too many parcels, the largest are kept.
-- Parcel labels shrink further when zoomed out, down to a quarter of their size, so more parcels
+- Parcel labels shrink further when zoomed out, down to a third of their size (4 px at the smallest), so more parcels
   keep a label. Existing parcel layers move to the new zoom settings once.
 
 ## Data safety and operating cost
