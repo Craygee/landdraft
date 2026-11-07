@@ -3,6 +3,7 @@ import { pointSymbolOpacity } from "./iconOpacity.ts";
 import type { Map as MlMap, LayerSpecification } from "maplibre-gl";
 import type { GisLayer, FillPattern } from "./types";
 import { isParcelLayer, parcelLabelSourceId, parcelLabelSizeExpression } from "./parcelDisplay.ts";
+import { lineGapSourceId, lineLabelMode, lineLabelSourceId } from "./lineLabels.ts";
 
 export const sourceId = (layerId: string) => `src-${layerId}`;
 export const fillId = (layerId: string) => `fill-${layerId}`;
@@ -193,6 +194,9 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       : categoryIcon
     : ["coalesce", ["get", "MARKER_ICON"], ""];
   const shownFilter = ["!", ["boolean", ["get", "__hidden"], false]];
+  const labelGeometryFamily = primaryLabelGeometry(layer);
+  const lineLabels = lineLabelMode(layer, labelGeometryFamily);
+  const inlineLabels = lineLabels === "inline";
   const geometryFilter = (filter: unknown[]) => ["all", filter, shownFilter];
   const fillPaint: Record<string, unknown> = patternId
     ? { "fill-pattern": patternId, "fill-opacity": s.fillOpacity * layerOpacity(s) }
@@ -282,7 +286,8 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
     {
       id: lineId(layer.id),
       type: "line",
-      source: src,
+      // Inline labels draw the line from a copy with the stretch under each label cut out.
+      source: inlineLabels ? lineGapSourceId(layer.id) : src,
       filter: geometryFilter([
         "match",
         ["geometry-type"],
@@ -409,7 +414,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
   ];
 
   if (s.labelEnabled && (s.labelUseLayerName || s.labelTemplate.trim().length > 0)) {
-    const geometry = primaryLabelGeometry(layer);
+    const geometry = labelGeometryFamily;
     const requestedPlacement = s.labelPlacement ?? "auto";
     const placement =
       requestedPlacement === "auto"
@@ -498,7 +503,40 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
         "text-halo-width": s.labelHaloWidth ?? 1.6,
       },
     };
-    if (isParcelLayer(layer)) {
+    if (inlineLabels) {
+      specs.push({
+        ...labelSpec,
+        source: lineLabelSourceId(layer.id),
+        filter: ["has", "__angle"] as never,
+        layout: {
+          ...labelSpec.layout,
+          "text-field": ["get", "__label"],
+          "symbol-placement": "point",
+          "text-anchor": "center",
+          "text-offset": [0, 0],
+          "text-rotate": ["get", "__angle"],
+          "text-rotation-alignment": "map",
+          "text-pitch-alignment": "map",
+          "text-keep-upright": false,
+          "text-max-width": 1000,
+          // The line is already cut for this exact spot, so the label must always draw.
+          "text-allow-overlap": true,
+          "text-ignore-placement": false,
+          "text-padding": 0,
+        },
+      });
+    } else if (lineLabels === "chain") {
+      specs.push({
+        ...labelSpec,
+        source: lineLabelSourceId(layer.id),
+        layout: {
+          ...labelSpec.layout,
+          "text-field": ["get", "__label"],
+          "symbol-spacing": 320,
+          "text-max-angle": 50,
+        },
+      });
+    } else if (isParcelLayer(layer)) {
       specs.push({
         ...labelSpec,
         source: parcelLabelSourceId(layer.id),

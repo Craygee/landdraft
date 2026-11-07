@@ -44,6 +44,7 @@ import {
 } from "@/lib/gis/repositories";
 import { useWorkbench } from "@/lib/gis/store";
 import { useMapRef } from "@/lib/gis/mapRef";
+import { PARCEL_DISPLAY_VERSION } from "@/lib/gis/parcelDisplay";
 import {
   checkProjectConnections,
   findConnectionReplacement,
@@ -325,7 +326,7 @@ export function DataDrawer() {
       ...(where ? { where } : {}),
       requiresViewport: true,
       minZoom: effectiveMinZoom,
-      ...(entry.id === "tx-parcels" ? { parcelDisplayVersion: 2 } : {}),
+      ...(entry.id === "tx-parcels" ? { parcelDisplayVersion: PARCEL_DISPLAY_VERSION } : {}),
       ...(selectedFields[entry.id]?.length
         ? { outFields: selectedFields[entry.id] }
         : entry.outFields
@@ -966,7 +967,7 @@ export function DataDrawer() {
                         {entry.url && (
                           <span className="rounded-full bg-secondary px-2 py-0.5">
                             {entry.id === "tx-parcels"
-                              ? "Borders 10+ · large-parcel labels 11+"
+                              ? "Borders and large-parcel labels 10+"
                               : `zoom ${entry.minZoom ?? (entry.geometry === "point" ? 7 : 5)}+`}
                           </span>
                         )}

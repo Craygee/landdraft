@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildParcelLabels,
   parcelLabelSizeAtZoom,
+  parcelLabelRadius,
   parcelInterior,
   parcelScreenArea,
   parcelLabelSourceId,
@@ -106,9 +107,13 @@ test("parcel labels appear at fractional zoom when the padded text fits inside t
   const zoom = Number(label.properties!["__parcelLabelMinZoom"]);
   const interior = parcelInterior(polygon)!;
   const lines = String(label.properties!["__label"]).split("\n");
-  const width = Math.max(...lines.map((line) => line.length)) * 11 * 0.72;
   const height = lines.length * 11 * (layer.style.labelLineSpacing ?? 1.2);
-  const paddedRadius = Math.hypot(width, height) / 2 + (layer.style.labelHaloWidth ?? 2) + 4;
+  const paddedRadius = parcelLabelRadius(
+    lines,
+    11,
+    layer.style.labelLineSpacing ?? 1.2,
+    layer.style.labelHaloWidth ?? 2,
+  );
   assert.ok(Math.abs(interior.radius * 512 * 2 ** zoom - paddedRadius) < 0.001);
   assert.notEqual(zoom, Math.ceil(zoom));
   // The old inflated width and whole-zoom rounding unnecessarily hid this label.
@@ -117,12 +122,18 @@ test("parcel labels appear at fractional zoom when the padded text fits inside t
   assert.ok(zoom < Math.ceil(Math.log2(oldRadius / (interior.radius * 512))));
 });
 
-test("parcel fonts grow from 5px at zoom 11 to their 11px default at zoom 13, then stop", () => {
-  assert.equal(parcelLabelSizeAtZoom(11, 10), 5);
-  assert.equal(parcelLabelSizeAtZoom(11, 11), 5);
-  assert.equal(parcelLabelSizeAtZoom(11, 12), 8);
-  assert.equal(parcelLabelSizeAtZoom(11, 13), 11);
+test("parcel fonts shrink to 4px when zoomed out and grow to their 11px default at zoom 14", () => {
+  assert.equal(parcelLabelSizeAtZoom(11, 9), 4);
+  assert.equal(parcelLabelSizeAtZoom(11, 10), 4);
+  assert.equal(parcelLabelSizeAtZoom(11, 11), 4);
+  assert.ok(Math.abs(parcelLabelSizeAtZoom(11, 12.5) - 7.5) < 1e-9);
+  assert.equal(parcelLabelSizeAtZoom(11, 14), 11);
   assert.equal(parcelLabelSizeAtZoom(11, 20), 11);
+  // Larger chosen sizes shrink to a third of their size.
+  assert.equal(parcelLabelSizeAtZoom(18, 10), 6);
+  // Every zoomed-out size is no larger than the previous 5px floor.
+  for (let zoom = 10; zoom <= 14; zoom += 0.5)
+    assert.ok(parcelLabelSizeAtZoom(11, zoom) <= Math.max(5, 5 + 6 * ((zoom - 11) / 2)) + 1e-9);
 });
 test("scaled parcel labels become eligible earlier and still fit at their displayed font size", () => {
   const scaled = structuredClone(layer);
@@ -135,14 +146,12 @@ test("scaled parcel labels become eligible earlier and still fit at their displa
   assert.ok(zoom < constant);
   const font = parcelLabelSizeAtZoom(11, zoom);
   const lines = String(label.properties!["__label"]).split("\n");
-  const radius =
-    Math.hypot(
-      Math.max(...lines.map((line) => line.length)) * font * 0.72,
-      lines.length * font * (layer.style.labelLineSpacing ?? 1.2),
-    ) /
-      2 +
-    (layer.style.labelHaloWidth ?? 2) +
-    4;
+  const radius = parcelLabelRadius(
+    lines,
+    font,
+    layer.style.labelLineSpacing ?? 1.2,
+    layer.style.labelHaloWidth ?? 2,
+  );
   assert.ok(parcelInterior(polygon)!.radius * 512 * 2 ** zoom >= radius - 0.001);
   const spec = buildLayerSpecs(scaled, {} as Map).find((spec) => spec.id === "label-parcel-test");
   assert.ok(spec?.type === "symbol");
@@ -151,10 +160,10 @@ test("scaled parcel labels become eligible earlier and still fit at their displa
     ["linear"],
     ["zoom"],
     0,
-    5,
+    4,
     11,
-    5,
-    13,
+    4,
+    14,
     11,
     24,
     11,

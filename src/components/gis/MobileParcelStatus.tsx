@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { useWorkbench } from "@/lib/gis/store";
-import { isParcelLayer } from "@/lib/gis/parcelDisplay";
+import { isParcelLayer, PARCEL_DISPLAY_VERSION } from "@/lib/gis/parcelDisplay";
 import { TEXAS_PARCEL_URL } from "@/lib/gis/texasParcels";
 import type { GisLayer } from "@/lib/gis/types";
 
@@ -63,7 +63,7 @@ export function MobileParcelStatus() {
           url: TEXAS_PARCEL_URL,
           requiresViewport: true,
           minZoom: 10,
-          parcelDisplayVersion: 2,
+          parcelDisplayVersion: PARCEL_DISPLAY_VERSION,
         },
         style,
         data: { type: "FeatureCollection", features: [] },
@@ -79,7 +79,7 @@ export function MobileParcelStatus() {
         url: TEXAS_PARCEL_URL,
         requiresViewport: true,
         minZoom: 10,
-        parcelDisplayVersion: 2,
+        parcelDisplayVersion: PARCEL_DISPLAY_VERSION,
         refreshToken: (layer.source.refreshToken ?? 0) + 1,
       },
     });

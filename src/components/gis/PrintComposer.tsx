@@ -40,7 +40,7 @@ import type { Feature, FeatureCollection } from "geojson";
 import { useWorkbench } from "@/lib/gis/store";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { getBasemap, getBasemapStyle } from "@/lib/gis/basemaps";
-import { allLayerIds, buildLayerSpecs, sourceId } from "@/lib/gis/mapStyle";
+import { allLayerIds, buildLayerSpecs, primaryLabelGeometry, sourceId } from "@/lib/gis/mapStyle";
 import { composeLabel } from "@/lib/gis/labels";
 import type {
   GisLayer,
@@ -56,6 +56,13 @@ import { uploadProjectAsset } from "@/lib/gis/projectRecords";
 import { PRINT_PAPER_OPTIONS, printPageGeometry } from "@/lib/gis/printLayout";
 import { PrintLegend } from "./PrintLegend";
 import { buildParcelLabels, isParcelLayer, parcelLabelSourceId } from "@/lib/gis/parcelDisplay";
+import {
+  buildLineChains,
+  lineGapSourceId,
+  lineLabelMode,
+  lineLabelSourceId,
+} from "@/lib/gis/lineLabels";
+import { syncLineLabelSources } from "@/lib/gis/lineLabelSources";
 import {
   defaultFeatureCalloutFields,
   featureCalloutLines,
@@ -385,24 +392,24 @@ export function PrintComposer() {
       includedLayers.flatMap((layer) => [
         sourceId(`print-${layer.id}`),
         ...(isParcelLayer(layer) ? [parcelLabelSourceId(`print-${layer.id}`)] : []),
+        ...(lineLabelMode(layer, primaryLabelGeometry(layer))
+          ? [lineLabelSourceId(`print-${layer.id}`), lineGapSourceId(`print-${layer.id}`)]
+          : []),
       ]),
     );
+    const derivedPrintSource = (sid: string) =>
+      sid.startsWith("src-print-") ||
+      sid.startsWith("src-parcel-labels-print-") ||
+      sid.startsWith("src-line-labels-print-") ||
+      sid.startsWith("src-line-gap-print-");
     for (const spec of map.getStyle().layers ?? []) {
       const sid = (spec as { source?: string }).source;
-      if (
-        sid &&
-        (sid.startsWith("src-print-") || sid.startsWith("src-parcel-labels-print-")) &&
-        !keep.has(sid)
-      )
-        map.removeLayer(spec.id);
+      if (sid && derivedPrintSource(sid) && !keep.has(sid)) map.removeLayer(spec.id);
     }
     for (const sid of Object.keys(map.getStyle().sources ?? {})) {
-      if (
-        (sid.startsWith("src-print-") || sid.startsWith("src-parcel-labels-print-")) &&
-        !keep.has(sid)
-      )
-        map.removeSource(sid);
+      if (derivedPrintSource(sid) && !keep.has(sid)) map.removeSource(sid);
     }
+    const inlineRefresh: Array<() => void> = [];
     for (const layer of [...includedLayers].reverse()) {
       const printLayer: GisLayer = { ...layer, id: `print-${layer.id}` };
       const sid = sourceId(printLayer.id);
@@ -427,6 +434,15 @@ export function PrintComposer() {
         const labelSource = map.getSource(labelSid) as GeoJSONSource | undefined;
         if (labelSource) labelSource.setData(labels);
         else map.addSource(labelSid, { type: "geojson", data: labels });
+      }
+      const lineMode = lineLabelMode(printLayer, primaryLabelGeometry(printLayer));
+      if (lineMode) {
+        const chains = buildLineChains(data);
+        syncLineLabelSources(map, printLayer.id, printLayer, data, chains, lineMode);
+        if (lineMode === "inline")
+          inlineRefresh.push(() =>
+            syncLineLabelSources(map, printLayer.id, printLayer, data, chains, "inline"),
+          );
       }
       const source = map.getSource(sid);
       if (layer.source.kind === "image") {
@@ -464,6 +480,12 @@ export function PrintComposer() {
       for (const id of ["label-print-" + layer.id, "label-print-" + layer.id + "-lines"])
         if (map.getLayer(id)) map.moveLayer(id);
     }
+    if (!inlineRefresh.length) return;
+    const refresh = () => inlineRefresh.forEach((run) => run());
+    map.on("moveend", refresh);
+    return () => {
+      map.off("moveend", refresh);
+    };
   }, [includedLayers, mapReady]);
 
   useEffect(() => {

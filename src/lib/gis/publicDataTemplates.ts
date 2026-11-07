@@ -1,5 +1,6 @@
 import { catalog, type CatalogEntry } from "./catalog.ts";
 import { defaultStyle, type GisLayer, type LayerStyle } from "./types.ts";
+import { PARCEL_DISPLAY_VERSION } from "./parcelDisplay.ts";
 
 export const NO_PUBLIC_DATA_TEMPLATE = "none";
 
@@ -228,7 +229,7 @@ export const catalogLayerStyle = (entry: CatalogEntry): Partial<LayerStyle> => {
       labelEnabled: true,
       labelTemplate: "{OWNER_NAME}",
       labelFields: ["OWNER_NAME"],
-      labelMinZoom: 11,
+      labelMinZoom: 10,
       labelSize: 11,
       labelScaleWithZoom: true,
       ...published,
@@ -295,7 +296,7 @@ const templateLayer = (
           requiresViewport: true,
           minZoom:
             entry.minZoom ?? (entry.geometry === "point" ? 7 : entry.geometry === "line" ? 5 : 5),
-          ...(entry.id === "tx-parcels" ? { parcelDisplayVersion: 2 } : {}),
+          ...(entry.id === "tx-parcels" ? { parcelDisplayVersion: PARCEL_DISPLAY_VERSION } : {}),
         };
   return {
     id: `public-template-${templateId}-${entry.id}-${Math.random().toString(36).slice(2, 9)}`,

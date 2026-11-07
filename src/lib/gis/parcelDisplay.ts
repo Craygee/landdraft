@@ -2,9 +2,24 @@ import type { Feature, FeatureCollection, Position } from "geojson";
 import type { GisLayer } from "./types.ts";
 
 export const PARCEL_OVERVIEW_ZOOM = 10;
+/** Bump when the shipped parcel display defaults change; older saved layers migrate once. */
+export const PARCEL_DISPLAY_VERSION = 3;
+/** Labels shrink down to this many pixels when zoomed out, so large parcels keep a label. */
+export const PARCEL_LABEL_MIN_SIZE = 4;
+/** Zoom at or below which parcel labels use their smallest size. */
+export const PARCEL_LABEL_SMALL_ZOOM = 11;
+/** Zoom at which parcel labels reach their chosen size. */
+export const PARCEL_LABEL_FULL_ZOOM = 14;
 export function parcelLabelSizeAtZoom(size: number, zoom: number) {
-  const small = Math.min(size, 5);
-  return small + (size - small) * Math.max(0, Math.min(1, (zoom - 11) / 2));
+  const small = Math.min(size, Math.max(PARCEL_LABEL_MIN_SIZE, size / 3));
+  const t = Math.max(
+    0,
+    Math.min(
+      1,
+      (zoom - PARCEL_LABEL_SMALL_ZOOM) / (PARCEL_LABEL_FULL_ZOOM - PARCEL_LABEL_SMALL_ZOOM),
+    ),
+  );
+  return small + (size - small) * t;
 }
 export function parcelLabelSizeExpression(size: number) {
   return [
@@ -12,14 +27,28 @@ export function parcelLabelSizeExpression(size: number) {
     ["linear"],
     ["zoom"],
     0,
-    parcelLabelSizeAtZoom(size, 11),
-    11,
-    parcelLabelSizeAtZoom(size, 11),
-    13,
+    parcelLabelSizeAtZoom(size, PARCEL_LABEL_SMALL_ZOOM),
+    PARCEL_LABEL_SMALL_ZOOM,
+    parcelLabelSizeAtZoom(size, PARCEL_LABEL_SMALL_ZOOM),
+    PARCEL_LABEL_FULL_ZOOM,
     size,
     24,
     size,
   ];
+}
+/** Average glyph advance of the label fonts, as a share of the font size. */
+export const PARCEL_LABEL_CHAR_WIDTH = 0.6;
+/** Radius in pixels of the circle a wrapped parcel label needs, including its halo. */
+export function parcelLabelRadius(lines: string[], font: number, lineSpacing = 1.2, haloWidth = 2) {
+  return (
+    Math.hypot(
+      Math.max(...lines.map((line) => line.length)) * font * PARCEL_LABEL_CHAR_WIDTH,
+      lines.length * font * lineSpacing,
+    ) /
+      2 +
+    haloWidth +
+    Math.max(1, font * 0.25)
+  );
 }
 export const parcelLabelSourceId = (id: string) => `src-parcel-labels-${id}`;
 export const isParcelLayer = (layer: GisLayer) =>
@@ -145,13 +174,12 @@ export function buildParcelLabels(layer: GisLayer, data: FeatureCollection): Fea
       else lines.push(word);
     }
     const paddedRadius = (font: number) =>
-      Math.hypot(
-        Math.max(...lines.map((line) => line.length)) * font * 0.72,
-        lines.length * font * (layer.style.labelLineSpacing ?? 1.2),
-      ) /
-        2 +
-      (layer.style.labelHaloWidth ?? 2) +
-      4;
+      parcelLabelRadius(
+        lines,
+        font,
+        layer.style.labelLineSpacing ?? 1.2,
+        layer.style.labelHaloWidth ?? 2,
+      );
     const geometry = feature.geometry;
     const polygons =
       geometry?.type === "Polygon"

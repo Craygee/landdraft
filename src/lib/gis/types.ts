@@ -39,7 +39,16 @@ export interface CategorizedStyle {
 }
 
 export type LabelPlacement =
-  "auto" | "center" | "above" | "below" | "left" | "right" | "follow-line" | "horizontal";
+  | "auto"
+  | "center"
+  | "above"
+  | "below"
+  | "left"
+  | "right"
+  | "follow-line"
+  | "horizontal"
+  /** Straight label set into the line, with the line cut away underneath it. */
+  | "inline";
 
 export interface LayerStyle {
   /** Master opacity multiplies fill, stroke, symbols and labels without changing category colors. */
