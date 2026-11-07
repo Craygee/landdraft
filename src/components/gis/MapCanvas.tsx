@@ -33,6 +33,8 @@ import {
   Plus,
   RotateCcw,
   Redo2,
+  ArrowDownToLine,
+  ArrowUpToLine,
 } from "lucide-react";
 
 import { useWorkbench } from "@/lib/gis/store";
@@ -184,6 +186,22 @@ export function MapCanvas() {
   const elevationProfileOpenRef = useRef(elevationProfileOpen);
   elevationProfileOpenRef.current = elevationProfileOpen || buildableAreaOpen;
   const [cursor, setCursor] = useState<{ lng: number; lat: number } | null>(null);
+  const [showReadoutDetail, setShowReadoutDetail] = useState(false);
+  const [helperDock, setHelperDock] = useState<"top" | "bottom">(() => {
+    try {
+      return window.localStorage.getItem(HELPER_DOCK_KEY) === "bottom" ? "bottom" : "top";
+    } catch {
+      return "top";
+    }
+  });
+  const changeHelperDock = (dock: "top" | "bottom") => {
+    setHelperDock(dock);
+    try {
+      window.localStorage.setItem(HELPER_DOCK_KEY, dock);
+    } catch {
+      // Storage can be blocked; the bar still moves for this visit.
+    }
+  };
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [draft, setDraft] = useState<Position[]>([]);
   const [ready, setReady] = useState(false);
@@ -1648,68 +1666,76 @@ export function MapCanvas() {
         </div>
       )}
 
-      {/* drawing helper bar */}
+      {/* drawing helper bar: one compact row so it covers as little of the map as
+          possible, and it can dock to the bottom when the area of interest is up top */}
       {(wb.drawMode !== "none" || draft.length > 0) && (
         <div
           className={cn(
-            "landdraft-drawing-helper pointer-events-auto absolute left-1/2 top-[var(--map-top-inset,4rem)] z-20 -translate-x-1/2",
+            "landdraft-drawing-helper pointer-events-auto absolute left-1/2 z-20 -translate-x-1/2",
+            helperDock === "bottom" ? "bottom-12" : "top-[var(--map-top-inset,4rem)]",
             wb.drawMode === "select-multiple" && "mobile-selection-helper",
           )}
         >
-          <div className="float-surface flex max-w-[calc(100vw-1rem)] flex-wrap items-center justify-center gap-1 rounded-2xl px-2 py-2 text-xs">
-            <Crosshair className="size-4 text-primary" />
-            <span className="font-medium">
-              {wb.drawMode === "none"
-                ? "Measurement"
-                : wb.drawMode === "select-multiple"
-                  ? "Click features to add or remove them · New layer saves the selection"
-                  : wb.drawMode === "select-box"
-                    ? "Drag a box across features to select them"
-                    : wb.drawMode === "point"
-                      ? "Click the map to drop points"
-                      : wb.drawMode === "note"
-                        ? "Click the map to place a note marker"
-                        : vertexDrawingActive && draftVertexMode === "delete"
-                          ? "Click a white draft vertex to delete it"
-                          : "Click to add points, double-click or Enter to finish"}
-            </span>
-            {readout && (
-              <span className="num rounded-full bg-accent px-2 py-0.5 text-accent-foreground">
-                {readout.primary} · {readout.secondary}
+          <div className="float-surface flex max-w-[calc(100vw-1rem)] flex-wrap items-center justify-center gap-1 rounded-full px-1.5 py-1 text-xs">
+            {readout && vertexDrawingActive && draftVertexMode !== "delete" ? (
+              <button
+                type="button"
+                onClick={() => setShowReadoutDetail((value) => !value)}
+                title={`${readout.extra} · click for more units`}
+                aria-expanded={showReadoutDetail}
+                className="num rounded-full bg-accent px-2.5 py-1 font-semibold text-accent-foreground"
+              >
+                {readout.primary}
+                <span className="ml-1 font-normal opacity-75">· {readout.secondary}</span>
+              </button>
+            ) : (
+              <span className="flex items-center gap-1 px-1.5 font-medium">
+                <Crosshair className="size-3.5 text-primary" />
+                {wb.drawMode === "none"
+                  ? "Measurement"
+                  : wb.drawMode === "select-multiple"
+                    ? "Click features to add or remove · New layer saves them"
+                    : wb.drawMode === "select-box"
+                      ? "Drag a box across features"
+                      : wb.drawMode === "point"
+                        ? "Click the map to drop points"
+                        : wb.drawMode === "note"
+                          ? "Click the map to place a note"
+                          : vertexDrawingActive && draftVertexMode === "delete"
+                            ? "Click a white point to delete it"
+                            : "Click to add points · double-click to finish"}
               </span>
             )}
             {vertexDrawingActive && (
               <>
                 <VertexToolButton
-                  icon={<Plus />}
-                  label="Add"
-                  title="Add the next vertex by clicking the map"
-                  active={draftVertexMode === "add"}
-                  onClick={() => setDraftVertexMode("add")}
-                />
-                <VertexToolButton
                   icon={<Trash2 />}
-                  label="Delete"
-                  title="Delete a draft vertex by clicking it"
+                  label="Delete point"
+                  title={
+                    draftVertexMode === "delete"
+                      ? "Stop deleting and go back to adding points"
+                      : "Delete a point by clicking it"
+                  }
+                  iconOnly
                   active={draftVertexMode === "delete"}
                   disabled={draft.length === 0}
-                  onClick={() => setDraftVertexMode("delete")}
+                  onClick={() =>
+                    setDraftVertexMode(draftVertexMode === "delete" ? "add" : "delete")
+                  }
                 />
-              </>
-            )}
-            {vertexDrawingActive && (
-              <>
                 <VertexToolButton
                   icon={<Undo2 />}
                   label="Undo"
-                  title="Undo the last draft vertex change"
+                  title="Undo the last point change"
+                  iconOnly
                   disabled={draftHistoryRef.current.length === 0}
                   onClick={undoDraftGeometry}
                 />
                 <VertexToolButton
                   icon={<Redo2 />}
                   label="Redo"
-                  title="Redo the last undone draft vertex change"
+                  title="Redo the last undone point change"
+                  iconOnly
                   disabled={draftRedoRef.current.length === 0}
                   onClick={redoDraftGeometry}
                 />
@@ -1727,6 +1753,25 @@ export function MapCanvas() {
                 </button>
               )}
             <button
+              type="button"
+              onClick={() => changeHelperDock(helperDock === "bottom" ? "top" : "bottom")}
+              className="rounded-full p-1 text-muted-foreground hover:bg-muted"
+              aria-label={
+                helperDock === "bottom" ? "Move this bar to the top" : "Move this bar to the bottom"
+              }
+              title={
+                helperDock === "bottom"
+                  ? "Move this bar to the top of the map"
+                  : "Move this bar to the bottom of the map"
+              }
+            >
+              {helperDock === "bottom" ? (
+                <ArrowUpToLine className="size-3.5" />
+              ) : (
+                <ArrowDownToLine className="size-3.5" />
+              )}
+            </button>
+            <button
               onClick={() => {
                 clearDraftGeometry();
                 wb.setDrawMode("none");
@@ -1738,7 +1783,7 @@ export function MapCanvas() {
               <X className="size-3.5" />
             </button>
           </div>
-          {readout && (
+          {readout && showReadoutDetail && (
             <div className="num mt-1 rounded-full bg-card/90 px-3 py-1 text-center text-[10px] text-muted-foreground shadow-panel">
               {readout.extra}
             </div>
@@ -1867,6 +1912,8 @@ function MenuItem({
   );
 }
 
+const HELPER_DOCK_KEY = "landdraft.drawing-helper-dock.v1";
+
 function VertexToolButton({
   icon,
   label,
@@ -1874,11 +1921,13 @@ function VertexToolButton({
   active = false,
   disabled = false,
   primary = false,
+  iconOnly = false,
   onClick,
 }: {
   icon: React.ReactNode;
   label: string;
   title: string;
+  iconOnly?: boolean;
   active?: boolean;
   disabled?: boolean;
   primary?: boolean;
@@ -1890,6 +1939,7 @@ function VertexToolButton({
       onClick={onClick}
       disabled={disabled}
       aria-pressed={active || undefined}
+      aria-label={iconOnly ? label : undefined}
       title={title}
       className={cn(
         "flex min-h-8 items-center gap-1 rounded-lg px-2 text-[10px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-35",
@@ -1901,7 +1951,7 @@ function VertexToolButton({
       )}
     >
       <span className="[&>svg]:size-3.5">{icon}</span>
-      <span>{label}</span>
+      {!iconOnly && <span>{label}</span>}
     </button>
   );
 }
