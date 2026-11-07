@@ -184,6 +184,11 @@ const blankProjectState = (
   };
 };
 
+const catalogGeometryFor = (source: LayerSource) => {
+  const catalogId = "catalogId" in source ? source.catalogId : undefined;
+  return catalogId ? catalog.find((entry) => entry.id === catalogId)?.geometry : undefined;
+};
+
 const normalizedLayer = (layer: GisLayer, index: number): GisLayer => {
   let source =
     layer.source.kind === "remote" && layer.source.catalogId && !layer.source.requiresViewport
@@ -757,9 +762,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
               ...suggestedPointIconStyle(
                 input,
                 pointIconPrefsRef.current,
-                "catalogId" in input.source && input.source.catalogId
-                  ? catalog.find((entry) => entry.id === input.source.catalogId)?.geometry
-                  : undefined,
+                catalogGeometryFor(input.source),
               ),
               ...input.style,
             };
