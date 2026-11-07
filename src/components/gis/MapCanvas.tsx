@@ -1602,7 +1602,7 @@ export function MapCanvas() {
       {(wb.drawMode !== "none" || draft.length > 0) && (
         <div
           className={cn(
-            "landdraft-drawing-helper pointer-events-auto absolute left-1/2 z-20 -translate-x-1/2",
+            "landdraft-drawing-helper pointer-events-auto absolute left-1/2 z-20 w-max max-w-[calc(100%-1rem)] -translate-x-1/2",
             helperDock === "bottom" ? "bottom-12" : "top-[var(--map-top-inset,4rem)]",
             wb.drawMode === "select-multiple" && "mobile-selection-helper",
           )}
