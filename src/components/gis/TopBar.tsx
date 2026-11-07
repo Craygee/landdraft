@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Save,
   FolderOpen,
@@ -86,8 +86,68 @@ export function TopBar({
     setShowModulesMenu(false);
   };
 
+  const headerRef = useRef<HTMLElement>(null);
+  const anyMenuOpen =
+    showAbout ||
+    showProjects ||
+    showExport ||
+    showShare ||
+    showDataMenu ||
+    showFileMenu ||
+    showModulesMenu;
+
+  // Clicking back onto the map (or anywhere outside the top bar) collapses its
+  // menus. Dialogs, dropdowns and toasts opened from a menu render in portals
+  // outside the header, so pointer-downs inside them keep the menu open.
+  useEffect(() => {
+    if (!anyMenuOpen) return;
+    const closeAll = () => {
+      setShowAbout(false);
+      setShowProjects(false);
+      setShowExport(false);
+      setShowShare(false);
+      setShowDataMenu(false);
+      setShowFileMenu(false);
+      setShowModulesMenu(false);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (headerRef.current?.contains(target)) return;
+      if (
+        target.closest(
+          '[role="dialog"], [role="alertdialog"], [role="listbox"], [data-radix-popper-content-wrapper], [data-sonner-toaster]',
+        )
+      )
+        return;
+      closeAll();
+      // A click that only dismisses a menu should not also select or draw on
+      // the map underneath, so swallow the click that follows this press.
+      if (target.closest(".maplibregl-canvas-container")) {
+        const swallow = (clickEvent: MouseEvent) => {
+          clickEvent.stopPropagation();
+          clickEvent.preventDefault();
+        };
+        document.addEventListener("click", swallow, { capture: true, once: true });
+        window.setTimeout(() => document.removeEventListener("click", swallow, true), 600);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeAll();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [anyMenuOpen]);
+
   return (
-    <header className="relative z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-2 sm:px-4">
+    <header
+      ref={headerRef}
+      className="relative z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-2 sm:px-4"
+    >
       <button
         onClick={onTogglePanel}
         aria-label="Toggle layer panel"

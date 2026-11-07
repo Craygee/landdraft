@@ -139,7 +139,7 @@ export function FeatureAttributesWindow() {
 
   return createPortal(
     <section
-      className="panel-surface fixed inset-x-3 top-[max(4.5rem,calc(env(safe-area-inset-top)+4rem))] z-[70] flex max-h-[min(70dvh,620px)] flex-col overflow-hidden rounded-2xl shadow-float sm:inset-x-auto sm:right-4 sm:top-20 sm:w-[min(430px,calc(100vw-2rem))]"
+      className="panel-surface fixed inset-x-3 top-[max(4.5rem,calc(env(safe-area-inset-top)+4rem))] z-[70] flex max-h-[min(70dvh,620px)] flex-col overflow-hidden rounded-2xl shadow-float sm:inset-x-auto sm:right-4 sm:top-[var(--map-top-offset,5rem)] sm:max-h-[min(70dvh,calc(100dvh-var(--map-top-offset,5rem)-10rem))] sm:w-[min(430px,calc(100vw-2rem))]"
       aria-label="Selected map item attributes"
       role="dialog"
       aria-modal="false"
