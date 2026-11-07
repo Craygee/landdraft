@@ -53,6 +53,7 @@ import { ButtonHelpSettings } from "@/components/ui/ButtonHelpSettings";
 
 import { MapLegendControl } from "./MapLegendControl";
 import { AccountPublicDataProvider } from "@/lib/gis/AccountPublicData";
+import { DefaultPointIconSettings } from "./PublicDataAccountControls";
 import { AccountServiceLayers } from "./AccountServiceLayers";
 import { MobileParcelStatus } from "./MobileParcelStatus";
 import { OfflineAreasPanel } from "./OfflineAreasPanel";
@@ -682,6 +683,7 @@ function MobileTourMenu({ onDone }: { onDone: () => void }) {
         Offer tours when major new features are added
       </label>
       <ButtonHelpSettings compact />
+      <DefaultPointIconSettings />
       <div className="flex items-center justify-between rounded-xl bg-secondary px-3 py-2">
         <span className="font-medium">LandDraft version</span>
         <span className="font-mono text-[10px]">
