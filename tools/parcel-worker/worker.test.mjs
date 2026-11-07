@@ -229,3 +229,38 @@ test("search metadata lists only counties in the published index", async () => {
   assert.equal(response.status, 200);
   assert.deepEqual((await response.json()).counties, [{ name: "Travis", fips: "48453" }]);
 });
+test("overview tiers are served and publishable, other names are not", async () => {
+  const object = {
+    body: new Uint8Array([1]),
+    size: 1,
+    httpEtag: '"o"',
+    writeHttpMetadata() {},
+  };
+  const env = { PARCELS: { get: async () => object } };
+  const ok = await worker.fetch(
+    new Request(origin + "/texas/versions/1234567890abcdef/overview-0080.fgb"),
+    env,
+  );
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get("Content-Type"), "application/flatgeobuf");
+  assert.equal(
+    (
+      await worker.fetch(
+        new Request(origin + "/texas/versions/1234567890abcdef/overview-big.fgb"),
+        env,
+      )
+    ).status,
+    404,
+  );
+  let saved = "";
+  const put = await worker.fetch(
+    new Request(origin + "/admin/object?key=texas/versions/1234567890abcdef/overview-0005.fgb", {
+      method: "PUT",
+      headers: { Authorization: "Bearer test" },
+      body: "fgb",
+    }),
+    { PUBLISH_TOKEN: "test", PARCELS: { put: async (key) => (saved = key) } },
+  );
+  assert.equal(put.status, 200);
+  assert.equal(saved, "texas/versions/1234567890abcdef/overview-0005.fgb");
+});

@@ -52,6 +52,7 @@ import { DEFAULT_BASEMAP_ID } from "./basemaps";
 import { createCoreLayerGroups, ensureCoreLayerGroups } from "./projectGroups";
 import { normalizeLayerData, normalizeLayerStyle } from "./layerNormalization";
 import { dedupePublicDataLayers } from "./displayLayers";
+import { PARCEL_DISPLAY_VERSION } from "./parcelDisplay";
 import {
   NO_PUBLIC_DATA_TEMPLATE,
   applyPublicDataTemplateLayers,
@@ -199,6 +200,16 @@ const normalizedLayer = (layer: GisLayer, index: number): GisLayer => {
       source.minZoom = 10;
     if (style.labelMinZoom === 8 || style.labelMinZoom === 9) style.labelMinZoom = 11;
     if (style.labelSize === 11) style.labelScaleWithZoom = true;
+  }
+  // Version 4: smaller labels and the large-parcel overview let parcels and labels start at zoom 8.
+  if (
+    source.kind === "remote" &&
+    source.catalogId === "tx-parcels" &&
+    (source.parcelDisplayVersion ?? 0) < PARCEL_DISPLAY_VERSION
+  ) {
+    source = { ...source, parcelDisplayVersion: PARCEL_DISPLAY_VERSION };
+    if (source.minZoom === 10) source.minZoom = 8;
+    if (style.labelMinZoom === 10 || style.labelMinZoom === 11) style.labelMinZoom = 8;
   }
   return {
     ...layer,

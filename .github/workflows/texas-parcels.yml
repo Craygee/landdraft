@@ -48,18 +48,25 @@ jobs:
         if: steps.edition.outputs.mode == 'full'
         run: |
           python tools/texas-parcels-index.py
-      - name: Reuse hosted spatial manifest for search backfill
-        if: steps.edition.outputs.mode == 'search-only'
+      - name: Reuse hosted spatial manifest for a search or overview backfill
+        if: steps.edition.outputs.mode == 'search-only' || steps.edition.outputs.mode == 'overview-only'
         run: node tools/texas-parcels-prepare-search-backfill.mjs
       - name: Build statewide attribute-search index
-        if: steps.edition.outputs.needed == 'true'
+        if: steps.edition.outputs.mode == 'full' || steps.edition.outputs.mode == 'search-only'
         run: |
           python tools/texas-parcels-search-index.py
+      - name: Test zoomed-out overview builder
+        if: steps.edition.outputs.needed == 'true'
+        run: cd tools && python test_texas_parcels_overview.py
+      - name: Build zoomed-out large-parcel overview
+        if: steps.edition.outputs.needed == 'true'
+        run: |
+          python tools/texas-parcels-overview.py
       - name: Publish verified version
         if: steps.edition.outputs.needed == 'true'
         env:
           PARCEL_PUBLISH_TOKEN: ${{ secrets.PARCEL_PUBLISH_TOKEN }}
-          PARCEL_SEARCH_ONLY: ${{ steps.edition.outputs.mode == 'search-only' && '1' || '0' }}
+          PARCEL_UPLOAD_MODE: ${{ steps.edition.outputs.mode }}
         run: node tools/texas-parcels-upload.mjs
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
         if: always()
