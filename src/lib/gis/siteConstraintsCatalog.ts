@@ -13,7 +13,7 @@ export const siteConstraintsCatalog: CatalogEntry[] = [
     geometry: "polygon",
     url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28",
     sourcePage: "https://msc.fema.gov/portal/home",
-    keywords: ["fema", "floodplain", "flood", "floodway", "construction"],
+    keywords: ["fema", "floodplain", "flood", "100-year", "1% annual chance", "sfha"],
     states: "US",
     minZoom: 11,
     requiresViewport: true,
@@ -32,7 +32,7 @@ export const siteConstraintsCatalog: CatalogEntry[] = [
     geometry: "polygon",
     url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28",
     sourcePage: "https://msc.fema.gov/portal/home",
-    keywords: ["fema", "floodplain", "flood", "floodway", "construction"],
+    keywords: ["fema", "floodplain", "flood", "500-year", "0.2% annual chance"],
     states: "US",
     minZoom: 11,
     requiresViewport: true,
@@ -51,7 +51,7 @@ export const siteConstraintsCatalog: CatalogEntry[] = [
     geometry: "polygon",
     url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28",
     sourcePage: "https://msc.fema.gov/portal/home",
-    keywords: ["fema", "floodplain", "flood", "floodway", "construction"],
+    keywords: ["fema", "floodplain", "flood", "floodway", "regulatory floodway"],
     states: "US",
     minZoom: 11,
     requiresViewport: true,
@@ -146,7 +146,7 @@ export const siteConstraintsCatalog: CatalogEntry[] = [
       "https://www.nrcs.usda.gov/resources/data-and-reports/soil-survey-geographic-database-ssurgo",
     description:
       "Official detailed SSURGO map-unit polygons with soil survey area, map-unit name and symbol, farmland classification and land-capability attributes. Interpretations require the related NRCS tables and professional review.",
-    keywords: ["soil", "ssurgo", "map unit", "farmland", "capability", "construction"],
+    keywords: ["soil", "ssurgo", "map unit", "farmland", "capability"],
     states: "US",
     minZoom: 11,
     requiresViewport: true,
@@ -245,7 +245,7 @@ export const siteConstraintsCatalog: CatalogEntry[] = [
     minZoom: 11,
     description:
       "National Map cemetery locations for land-use screening. Points do not delineate burial grounds or legal setbacks.",
-    keywords: ["cemetery", "burial", "construction", "constraint"],
+    keywords: ["cemetery", "burial", "grave", "constraint"],
     category: "Environment",
     states: "US",
     requiresViewport: true,
@@ -281,7 +281,7 @@ export const siteConstraintsCatalog: CatalogEntry[] = [
     minZoom: 10,
     description:
       "Mapped trailhead locations for recreation and access context. Does not establish legal public access across intervening property.",
-    keywords: ["trail", "recreation", "access", "terrain"],
+    keywords: ["trail", "trailhead", "recreation", "access"],
     category: "Environment",
     states: "US",
     requiresViewport: true,
@@ -345,7 +345,7 @@ export const siteConstraintsCatalog: CatalogEntry[] = [
     minZoom: 11,
     description:
       "Mapped surface-water bodies and their source classifications. Includes reservoirs and ponds where mapped; coverage and survey dates vary.",
-    keywords: ["surface", "water", "lake", "pond", "reservoir", "building", "drainage"],
+    keywords: ["surface", "water", "lake", "pond", "reservoir", "drainage"],
     states: "US",
     connection: "live",
     updateCadence: "Agency maintained; source edition dates vary",
@@ -363,7 +363,7 @@ export const siteConstraintsCatalog: CatalogEntry[] = [
     minZoom: 11,
     description:
       "Mapped broad rivers, inundation areas and related hydrographic area features. Source attributes distinguish feature types.",
-    keywords: ["surface", "water", "river", "bank", "drainage", "construction"],
+    keywords: ["surface", "water", "river", "bank", "drainage"],
     states: "US",
     connection: "live",
     updateCadence: "Agency maintained; source edition dates vary",
@@ -435,7 +435,7 @@ export const siteConstraintsCatalog: CatalogEntry[] = [
     minZoom: 11,
     description:
       "Mapped wetland and deepwater habitats. Screening data only: does not establish jurisdictional wetland boundaries or permitting requirements.",
-    keywords: ["wetland", "marsh", "swamp", "habitat", "construction", "water"],
+    keywords: ["wetland", "marsh", "swamp", "habitat", "water"],
     states: "US",
     connection: "live",
     updateCadence: "Agency maintained; source edition dates vary",
@@ -454,7 +454,7 @@ export const siteConstraintsCatalog: CatalogEntry[] = [
     minZoom: 11,
     description:
       "Mapped riparian habitat where surveyed. Coverage is not nationwide; missing polygons do not establish that a site lacks riparian habitat.",
-    keywords: ["riparian", "stream", "buffer", "habitat", "river", "building"],
+    keywords: ["riparian", "stream", "buffer", "habitat", "river"],
     states: "US",
     connection: "live",
     updateCadence: "Agency maintained; source edition dates vary",
@@ -473,7 +473,7 @@ export const siteConstraintsCatalog: CatalogEntry[] = [
     minZoom: 11,
     description:
       "Effective mapped flood hazard zones and zone attributes. Unmapped or missing data are not a finding of no flood risk. Consult effective FIRM and local floodplain officials.",
-    keywords: ["flood", "floodplain", "floodway", "building", "construction", "hazard"],
+    keywords: ["flood", "floodplain", "floodway", "flood zone", "fema", "hazard"],
     states: "US",
     connection: "live",
     updateCadence: "Agency maintained; source edition dates vary",
@@ -491,7 +491,7 @@ export const siteConstraintsCatalog: CatalogEntry[] = [
     minZoom: 12,
     description:
       "Mapped base-flood-elevation lines where available. Check source units and vertical datum; these are not terrain contours or engineering design elevations.",
-    keywords: ["flood", "elevation", "bfe", "building", "hydrology"],
+    keywords: ["flood", "elevation", "bfe", "base flood elevation", "fema"],
     states: "US",
     connection: "live",
     updateCadence: "Agency maintained; source edition dates vary",
@@ -509,7 +509,7 @@ export const siteConstraintsCatalog: CatalogEntry[] = [
     minZoom: 11,
     description:
       "Levee features represented in FEMA flood mapping. Presence does not certify protection, condition or accreditation.",
-    keywords: ["levee", "flood", "defense", "embankment", "construction"],
+    keywords: ["levee", "flood", "defense", "embankment", "fema"],
     states: "US",
     connection: "live",
     updateCadence: "Agency maintained; source edition dates vary",
@@ -527,7 +527,7 @@ export const siteConstraintsCatalog: CatalogEntry[] = [
     minZoom: 11,
     description:
       "Mapped Letters of Map Revision boundaries. Inspect revision documents and effective dates before using them for development decisions.",
-    keywords: ["flood", "revision", "lomr", "permit", "building"],
+    keywords: ["flood", "revision", "lomr", "letter of map revision", "fema"],
     states: "US",
     connection: "live",
     updateCadence: "Agency maintained; source edition dates vary",
@@ -546,7 +546,7 @@ export const siteConstraintsCatalog: CatalogEntry[] = [
     minZoom: 2,
     description:
       "Worldwide reported earthquakes of magnitude 2.5 and greater in the past 30 days. Event locations and magnitudes may be revised. Event history is not a seismic design hazard map.",
-    keywords: ["earthquake", "seismic", "hazard", "magnitude", "building"],
+    keywords: ["earthquake", "seismic", "hazard", "magnitude", "recent"],
     states: "US",
     connection: "refresh",
     updateCadence: "USGS rolling 30-day feed; refresh by panning or reloading",

@@ -57,6 +57,7 @@ import {
 import { basemapProbeUrl, saveBasemapUrlOverride } from "@/lib/gis/basemaps";
 import { cn } from "@/lib/utils";
 import { importFile } from "@/lib/gis/import";
+import { catalogEntryTags, catalogMinZoom } from "@/lib/gis/catalogTags";
 import {
   NO_PUBLIC_DATA_TEMPLATE,
   catalogLayerStyle,
@@ -316,8 +317,7 @@ export function DataDrawer() {
       .filter(Boolean)
       .map((clause) => "(" + clause + ")")
       .join(" AND ");
-    const effectiveMinZoom =
-      entry.minZoom ?? (entry.geometry === "point" ? 7 : entry.geometry === "line" ? 5 : 5);
+    const effectiveMinZoom = catalogMinZoom(entry);
     const source = {
       kind: "remote" as const,
       url: entryUrl,
@@ -928,52 +928,30 @@ export function DataDrawer() {
                         />
                       )}
                       <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-muted-foreground">
-                        <span className="rounded-full bg-secondary px-2 py-0.5">
-                          {entry.category}
-                        </span>
-                        <span className="rounded-full bg-secondary px-2 py-0.5">
-                          {entry.geometry}
-                        </span>
-                        <span className="rounded-full bg-secondary px-2 py-0.5">
-                          {entry.states === "US" ? "Nationwide" : entry.states.join(", ")}
-                        </span>
-                        {(entry.url || entry.downloadUrl) && (
-                          <span className="rounded-full bg-secondary px-2 py-0.5">
-                            {entry.downloadUrl
-                              ? "official shapefile"
-                              : entry.rendering === "raster-tiles"
-                                ? "streamed map tiles"
-                                : "loads current view"}
-                          </span>
-                        )}
-                        <span
-                          className={cn(
-                            "flex items-center gap-1 rounded-full px-2 py-0.5",
-                            entry.connection === "live"
-                              ? "bg-accent text-accent-foreground"
-                              : "bg-secondary",
-                          )}
-                        >
-                          {entry.connection === "live" ? (
-                            <Radio className="size-2.5" />
+                        {catalogEntryTags(entry).map((tag) =>
+                          tag.kind === "connection" ? (
+                            <span
+                              key={tag.kind}
+                              className={cn(
+                                "flex items-center gap-1 rounded-full px-2 py-0.5",
+                                entry.connection === "live"
+                                  ? "bg-accent text-accent-foreground"
+                                  : "bg-secondary",
+                              )}
+                            >
+                              {entry.connection === "live" ? (
+                                <Radio className="size-2.5" />
+                              ) : (
+                                <Clock3 className="size-2.5" />
+                              )}
+                              {tag.label}
+                            </span>
                           ) : (
-                            <Clock3 className="size-2.5" />
-                          )}
-                          {entry.connection}
-                        </span>
-                        <span className="rounded-full bg-secondary px-2 py-0.5">
-                          {entry.updateCadence}
-                        </span>
-                        {entry.url && (
-                          <span className="rounded-full bg-secondary px-2 py-0.5">
-                            {entry.id === "tx-parcels"
-                              ? "Large parcels 8+ · full detail 12+"
-                              : `zoom ${entry.minZoom ?? (entry.geometry === "point" ? 7 : 5)}+`}
-                          </span>
+                            <span key={tag.kind} className="rounded-full bg-secondary px-2 py-0.5">
+                              {tag.label}
+                            </span>
+                          ),
                         )}
-                        <span className="rounded-full bg-secondary px-2 py-0.5">
-                          {entry.license}
-                        </span>
                       </div>
                       {entry.url && entry.rendering !== "raster-tiles" && (
                         <button
