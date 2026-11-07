@@ -408,30 +408,33 @@
     left: max(0.75rem, env(safe-area-inset-left, 0px));
     flex-direction: row;
   }
+}
 
-  .mobile-map-mode .maplibregl-ctrl-bottom-right,
-  .mobile-map-mode .maplibregl-ctrl-bottom-left {
-    bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
-  }
+/* The map route's bottom navigation spans the full width on phones and tablets
+   alike (iPads open this route), so these offsets must not depend on viewport
+   width. */
+.mobile-map-mode .maplibregl-ctrl-bottom-right,
+.mobile-map-mode .maplibregl-ctrl-bottom-left {
+  bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+}
 
-  /* Keep the app's movement/zoom locks clear of MapLibre's native control
-     stack. On the mobile map they form a compact rail above the scale bar on
-     the opposite side of the screen. Desktop positioning is unchanged. */
-  .mobile-map-mode .landdraft-map-lock-controls {
-    right: auto;
-    bottom: calc(7.25rem + env(safe-area-inset-bottom, 0px));
-    left: max(0.75rem, env(safe-area-inset-left, 0px));
-    flex-direction: row;
-  }
+/* Keep the app's movement/zoom locks clear of MapLibre's native control
+   stack. On the mobile map they form a compact rail above the scale bar on
+   the opposite side of the screen. Desktop positioning is unchanged. */
+.mobile-map-mode .landdraft-map-lock-controls {
+  right: auto;
+  bottom: calc(7.25rem + env(safe-area-inset-bottom, 0px));
+  left: max(0.75rem, env(safe-area-inset-left, 0px));
+  flex-direction: row;
+}
 
-  .mobile-map-mode.mobile-has-selection .maplibregl-ctrl-bottom-right,
-  .mobile-map-mode.mobile-has-selection .maplibregl-ctrl-bottom-left {
-    bottom: calc(11rem + env(safe-area-inset-bottom, 0px));
-  }
+.mobile-map-mode.mobile-has-selection .maplibregl-ctrl-bottom-right,
+.mobile-map-mode.mobile-has-selection .maplibregl-ctrl-bottom-left {
+  bottom: calc(11rem + env(safe-area-inset-bottom, 0px));
+}
 
-  .mobile-map-mode.mobile-has-selection .landdraft-map-lock-controls {
-    bottom: calc(11.75rem + env(safe-area-inset-bottom, 0px));
-  }
+.mobile-map-mode.mobile-has-selection .landdraft-map-lock-controls {
+  bottom: calc(11.75rem + env(safe-area-inset-bottom, 0px));
 }
 
 @supports (height: 100dvh) {
