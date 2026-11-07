@@ -77,7 +77,7 @@ export function DrawToolbar() {
   };
   if (!wb.canEditProject) return null;
   return (
-    <div className="float-surface flex items-center gap-1 rounded-2xl p-1.5">
+    <div className="float-surface flex max-w-full flex-wrap items-center gap-1 rounded-2xl p-1.5">
       <div className="flex items-center gap-1">
         {tools.map((tool) => (
           <button
