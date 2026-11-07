@@ -47,10 +47,17 @@ test("new point layers get a suggested icon unless one was chosen", async () => 
   });
   assert.deepEqual(suggestedPointIconStyle(layer()), { pointIcon: "◉" });
   assert.deepEqual(suggestedPointIconStyle(layer({ style: { pointIcon: "★" } })), {});
-  assert.deepEqual(suggestedPointIconStyle(layer({ data: { features: [{ geometry: { type: "Polygon" } }] } })), {});
+  assert.deepEqual(
+    suggestedPointIconStyle(layer({ data: { features: [{ geometry: { type: "Polygon" } }] } })),
+    {},
+  );
   assert.deepEqual(suggestedPointIconStyle(layer({ source: { kind: "derived" } })), {});
   assert.deepEqual(
-    suggestedPointIconStyle(layer({ data: { features: [] }, source: { kind: "remote" } }), {}, "point"),
+    suggestedPointIconStyle(
+      layer({ data: { features: [] }, source: { kind: "remote" } }),
+      {},
+      "point",
+    ),
     { pointIcon: "◉" },
   );
   assert.deepEqual(suggestedPointIconStyle(layer(), { well: "★" }), { pointIcon: "★" });
