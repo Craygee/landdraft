@@ -14,6 +14,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { installViewportSync } from "../lib/viewportSync";
 import { AuthProvider } from "../lib/auth";
 import { ButtonHelpProvider } from "../components/ui/ButtonHelpProvider";
+import { ViewportDebug } from "../components/ViewportDebug";
 
 function NotFoundComponent() {
   return (
@@ -169,6 +170,7 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <ViewportDebug />
       <AuthProvider>
         <ButtonHelpProvider>
           {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
