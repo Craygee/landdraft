@@ -51,7 +51,12 @@ class OverviewTests(unittest.TestCase):
             None,
         ]
         rows = len(geometries)
-        columns = {field.lower(): [f"{field}-{i}" for i in range(rows)] for field in REQUIRED_FIELDS}
+        # Like the FileGDB, the source has no OBJECTID field: it is the feature ID.
+        columns = {
+            field.lower(): [f"{field}-{i}" for i in range(rows)]
+            for field in REQUIRED_FIELDS
+            if field != "OBJECTID"
+        }
         columns["geometry"] = [None if g is None else shapely.to_wkb(g) for g in geometries]
         table = pa.table(columns)
         with tempfile.TemporaryDirectory() as folder:
@@ -60,6 +65,7 @@ class OverviewTests(unittest.TestCase):
             pyogrio.write_arrow(
                 table, source, driver="GPKG", geometry_name="geometry",
                 geometry_type="Polygon", crs="EPSG:3857",
+                layer_options={"FID": "OBJECTID"},
             )
             result = overview.build(source, folder, log=lambda _: None)
             self.assertEqual(result["scanned"], 3)
@@ -71,6 +77,7 @@ class OverviewTests(unittest.TestCase):
                 sorted(large["owner_name"].to_pylist()), ["OWNER_NAME-1", "OWNER_NAME-2"]
             )
             self.assertIn("LD_ACRES", large.column_names)
+            self.assertIn("OBJECTID", large.column_names)
             self.assertNotIn("legal_desc", large.column_names)
             # Bumps are gone and the shape is back to about its four corners.
             for geometry in shapely.from_wkb(large["wkb_geometry"].to_pylist()):
