@@ -57,6 +57,26 @@ test("West Virginia templates combine state services with the existing national 
   assert.ok(screeningIds.has("usgs-topographic-map"));
 });
 
+test("land study templates add verified state evidence and carry required field lists", () => {
+  const texas = publicDataTemplateEntries("texas-land-study");
+  const westVirginia = publicDataTemplateEntries("west-virginia-land-study");
+  const scoped = (ids: typeof texas, state: string) =>
+    ids.every((entry) => entry.states === "US" || entry.states.includes(state));
+  assert.ok(scoped(texas, "TX"));
+  assert.ok(scoped(westVirginia, "WV"));
+
+  const applied = applyPublicDataTemplateLayers([], "texas-land-study", 100);
+  const reports = applied.layers.find(
+    (layer) => "catalogId" in layer.source && layer.source.catalogId === "tx-twdb-well-reports",
+  );
+  assert.ok(reports?.source.kind === "remote" && reports.source.outFields?.length);
+  const image = applyPublicDataTemplateLayers([], "west-virginia-land-study", 100).layers.find(
+    (layer) =>
+      "catalogId" in layer.source && layer.source.catalogId === "wv-landslide-susceptibility",
+  );
+  assert.equal(image?.source.kind, "raster");
+});
+
 test("applying a template adds visible layers without duplicating catalog sources", () => {
   const first = applyPublicDataTemplateLayers([], "national-energy-development", 100);
   assert.equal(first.added, 5);

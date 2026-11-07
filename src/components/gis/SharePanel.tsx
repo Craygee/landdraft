@@ -298,10 +298,13 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
       });
       await refresh();
       setManagedShareId(share.id);
-      await navigator.clipboard.writeText(shareUrl(share.id));
+      // The share already exists, so a refused clipboard must not read as a failed share.
+      const copied = await navigator.clipboard.writeText(shareUrl(share.id)).then(
+        () => true,
+        () => false,
+      );
       toast.success("Private share link created", {
-        description:
-          "Link copied. It grants no access by itself; new invitations default to View only.",
+        description: `${copied ? "Link copied." : "Use the copy button below to get the link."} It grants no access by itself; new invitations default to View only.`,
       });
     } catch (error) {
       toast.error("Shared map could not be created", {
@@ -809,9 +812,10 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
                 <h3 className="min-w-0 flex-1 truncate font-semibold">{managedShare.name}</h3>
                 <button
                   onClick={() =>
-                    void navigator.clipboard
-                      .writeText(shareUrl(managedShare.id))
-                      .then(() => toast.success("Share link copied"))
+                    void navigator.clipboard.writeText(shareUrl(managedShare.id)).then(
+                      () => toast.success("Share link copied"),
+                      () => toast.error("Your browser blocked copying the link"),
+                    )
                   }
                   className="rounded-lg p-2 hover:bg-accent"
                   title="Copy secure link"

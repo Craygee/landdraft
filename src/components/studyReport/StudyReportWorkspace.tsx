@@ -25,8 +25,15 @@ import {
   svgDataUrl,
 } from "@/lib/gis/analysisArtifacts";
 import { snapshotFromLayer } from "@/lib/gis/buildableAreaModel";
-import { fetchRemoteGeoJSONPaged } from "@/lib/gis/arcgis";
+import { fetchArcgisFeatureCount, fetchRemoteGeoJSONPaged } from "@/lib/gis/arcgis";
+import type { TerrainGrid } from "@/lib/gis/buildableTerrainModel";
 import { publicDataTemplateById } from "@/lib/gis/publicDataTemplates";
+import {
+  measureLandCover,
+  measureTerrainFromGrid,
+  planStudyTerrain,
+  readNlcdPixel,
+} from "@/lib/studyReport/measurements";
 import {
   analyzeStudyReport,
   approximateBoundsFromMapView,
@@ -34,8 +41,15 @@ import {
   normalizeStudyReportWorkspace,
   studyBoundaryFromBounds,
   studyBoundaryFromLayer,
+  studyAcres,
+  studyBoundaryFromSelection,
   studyEvidenceSignature,
+  studyPercent,
+  studyQueryStateLabel,
+  studyQuietSources,
+  type StudyMeasurementResult,
 } from "@/lib/studyReport/model";
+import { refreshStudyLayers } from "@/lib/studyReport/refresh";
 import type {
   StudyReportSectionConfig,
   StudyReportSectionId,
@@ -49,6 +63,39 @@ const sectionStatus = {
   insufficient: { label: "Insufficient data", className: "bg-rose-100 text-rose-800" },
 } as const;
 
+const ANALYSIS_TIMEOUT_MS = 180_000;
+
+function analyzeInBackground(input: Parameters<typeof analyzeStudyReport>[0]) {
+  if (typeof Worker === "undefined") return Promise.resolve(analyzeStudyReport(input));
+  return new Promise<StudyReportWorkspaceState>((resolve, reject) => {
+    const task = new Worker(new URL("../../lib/studyReport/analysis.worker.ts", import.meta.url), {
+      type: "module",
+    });
+    const timer = window.setTimeout(() => {
+      task.terminate();
+      reject(new Error("The analysis took too long. Use a smaller boundary or fewer layers."));
+    }, ANALYSIS_TIMEOUT_MS);
+    const finish = () => {
+      window.clearTimeout(timer);
+      task.terminate();
+    };
+    task.onmessage = (
+      event: MessageEvent<
+        { ok: true; result: StudyReportWorkspaceState } | { ok: false; error: string }
+      >,
+    ) => {
+      finish();
+      if (event.data.ok) resolve(event.data.result);
+      else reject(new Error(event.data.error));
+    };
+    task.onerror = (event) => {
+      finish();
+      reject(new Error(event.message || "The analysis stopped unexpectedly."));
+    };
+    task.postMessage(input);
+  });
+}
+
 function polygonLayer(layer: ReturnType<typeof useWorkbench>["displayLayers"][number]) {
   return layer.data.features.some(
     (feature) => feature.geometry?.type === "Polygon" || feature.geometry?.type === "MultiPolygon",
@@ -57,6 +104,7 @@ function polygonLayer(layer: ReturnType<typeof useWorkbench>["displayLayers"][nu
 
 function sourceSelection(workspace: StudyReportWorkspaceState) {
   if (!workspace.boundary) return "";
+  if (workspace.boundary.sourceFeatures === "selected") return "selection";
   return workspace.boundary.source === "layer"
     ? `layer:${workspace.boundary.sourceLayerId}`
     : workspace.boundary.source;
@@ -123,23 +171,17 @@ export function StudyReportWorkspace() {
   useEffect(() => {
     if (!wb.projectReady || wb.studyReport || !wb.canEditProject) return;
     const initial = createStudyReportWorkspace(wb.projectName);
-    if (wb.projectArea?.bounds)
-      initial.boundary = studyBoundaryFromBounds(
-        "Saved project area",
-        "project-area",
-        wb.projectArea.bounds,
-      );
-    else if (polygonLayers[0]) {
-      const boundary = studyBoundaryFromLayer(polygonLayers[0]);
-      if (boundary) initial.boundary = boundary;
-    } else
-      initial.boundary = studyBoundaryFromBounds(
-        "Approximate current map view",
-        "current-view",
-        approximateBoundsFromMapView(wb.mapView),
-      );
+    // A rectangle is labeled as a rectangle. Picking the first polygon layer here could quietly make
+    // a statewide parcel or flood layer the subject of the study.
+    initial.boundary = wb.projectArea?.bounds
+      ? studyBoundaryFromBounds("Saved project area", "project-area", wb.projectArea.bounds)
+      : studyBoundaryFromBounds(
+          "Approximate current map view",
+          "current-view",
+          approximateBoundsFromMapView(wb.mapView),
+        );
     wb.setStudyReport(initial);
-  }, [wb, polygonLayers]);
+  }, [wb]);
 
   const run = async () => {
     if (!workspace.boundary) {
@@ -148,86 +190,87 @@ export function StudyReportWorkspace() {
     }
     setRunning(true);
     setAnalysisProgress("Preparing study boundary and active layers…");
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    // A timer rather than an animation frame, which would stall the run in a background tab.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     try {
       const activeLayers = wb.displayLayers.filter((layer) => layer.visible);
-      const refreshed = new Map(activeLayers.map((layer) => [layer.id, layer]));
-      const loadWarnings: string[] = [];
-      const remoteLayers = activeLayers
-        .filter(
-          (layer) =>
-            layer.source.kind === "remote" &&
-            layer.source.requiresViewport &&
-            /^https?:/i.test(layer.source.url),
-        )
-        .slice(0, 20);
-      let completed = 0;
-      for (let index = 0; index < remoteLayers.length; index += 3) {
-        const batch = remoteLayers.slice(index, index + 3);
-        await Promise.all(
-          batch.map(async (layer) => {
-            if (layer.source.kind !== "remote") return;
-            setAnalysisProgress(
-              `Loading official/project evidence ${completed + 1} of ${remoteLayers.length}: ${layer.name}`,
-            );
-            try {
-              const longitudeSpan = Math.max(
-                0.0001,
-                workspace.boundary!.bounds[2] - workspace.boundary!.bounds[0],
-              );
-              const result = await fetchRemoteGeoJSONPaged(layer.source.url, {
-                bbox: workspace.boundary!.bounds,
-                where: layer.source.where,
-                outFields: layer.source.outFields,
-                pageSize: 1_000,
-                maxTotalFeatures: 5_000,
-                maxAllowableOffset: longitudeSpan / 1_500,
-                geometryPrecision: longitudeSpan < 0.25 ? 6 : 5,
-                cacheHint: true,
-              });
-              const source = {
-                ...layer.source,
-                loading: false,
-                loadStatus: result.truncated ? ("zoom-in" as const) : ("complete" as const),
-                loadedFeatures: result.loaded,
-                ...(result.total !== undefined ? { expectedFeatures: result.total } : {}),
-                lastRefreshedAt: Date.now(),
-                ...(result.truncated
-                  ? {
-                      loadError: `Study report analyzed the first ${result.loaded.toLocaleString()} features returned for this area. Narrow the boundary for a complete inventory.`,
-                    }
-                  : {}),
-              };
-              if (!result.truncated) delete source.loadError;
-              const next = { ...layer, data: result.data, source };
-              refreshed.set(layer.id, next);
-              wb.updateDisplayLayer(layer.id, { data: result.data, source });
-              if (result.truncated)
-                loadWarnings.push(`${layer.name} reached the 5,000-feature screening limit.`);
-            } catch (error) {
-              loadWarnings.push(
-                `${layer.name}: ${error instanceof Error ? error.message : "provider request failed"}`,
-              );
-            } finally {
-              completed += 1;
-            }
-          }),
+      const boundary = workspace.boundary;
+      const measurementTasks: Array<Promise<StudyMeasurementResult>> = [];
+      const measured = (section: StudyReportSectionId) =>
+        workspace.sections.find((item) => item.id === section)?.enabled !== false;
+      if (measured("terrain"))
+        measurementTasks.push(
+          (async () => {
+            const plan = planStudyTerrain(boundary);
+            const response = await fetch("/api/analysis/buildable-terrain", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(plan),
+              signal: AbortSignal.timeout(50_000),
+            });
+            const grid = (await response.json()) as TerrainGrid & { error?: string };
+            if (!response.ok || grid.error)
+              throw new Error(grid.error ?? `Terrain service HTTP ${response.status}`);
+            return {
+              section: "terrain" as const,
+              measurement: measureTerrainFromGrid(boundary, grid),
+            };
+          })().catch((error: unknown) => ({
+            section: "terrain" as const,
+            failure: {
+              id: "terrain-grid",
+              title: "Measured elevation and slope",
+              message: error instanceof Error ? error.message : "The USGS grid could not load.",
+            },
+          })),
         );
-      }
-      setAnalysisProgress("Intersecting features, clipping polygons and summarizing attributes…");
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      const analysisLayers = activeLayers.map((layer) => refreshed.get(layer.id) ?? layer);
-      const result = analyzeStudyReport({
-        workspace,
-        layers: analysisLayers,
-        records: wb.records,
+      const landCoverActive = activeLayers.some(
+        (layer) =>
+          "catalogId" in layer.source && layer.source.catalogId === "usgs-annual-nlcd-land-cover",
+      );
+      if (landCoverActive && measured("land-cover"))
+        measurementTasks.push(
+          measureLandCover(
+            boundary,
+            (lon, lat) => readNlcdPixel(lon, lat),
+            new Date().toISOString(),
+          )
+            .then((measurement) => ({ section: "land-cover" as const, measurement }))
+            .catch((error: unknown) => ({
+              section: "land-cover" as const,
+              failure: {
+                id: "nlcd-sample",
+                title: "Sampled land cover",
+                message: error instanceof Error ? error.message : "The USGS service failed.",
+              },
+            })),
+        );
+      const refresh = await refreshStudyLayers(activeLayers, boundary, {
+        fetchFeatures: fetchRemoteGeoJSONPaged,
+        fetchCount: fetchArcgisFeatureCount,
+        onProgress: setAnalysisProgress,
       });
-      if (result.currentRun && loadWarnings.length)
-        result.currentRun.warnings.push(...loadWarnings.slice(0, 12));
+      for (const item of refresh.refreshed)
+        wb.updateDisplayLayer(item.id, { data: item.data, source: item.source });
+      setAnalysisProgress("Measuring terrain and land cover…");
+      const measurements = await Promise.all(measurementTasks);
+      setAnalysisProgress(
+        "Testing features against the boundary, clipping polygons and measuring distances…",
+      );
+      const result = await analyzeInBackground({
+        workspace,
+        layers: refresh.layers,
+        records: wb.records,
+        layerStatuses: refresh.statuses,
+        measurements,
+      });
       update(result);
+      const problems = refresh.statuses.filter((status) =>
+        ["failed", "truncated"].includes(status.state),
+      ).length;
       toast.success(
-        loadWarnings.length
-          ? `Study report refreshed with ${loadWarnings.length} provider warning${loadWarnings.length === 1 ? "" : "s"}.`
+        problems
+          ? `Study report refreshed. ${problems} source${problems === 1 ? "" : "s"} did not return complete data; see the report warnings.`
           : "Study report analysis refreshed.",
       );
     } catch (error) {
@@ -274,7 +317,33 @@ export function StudyReportWorkspace() {
     });
   };
 
+  const selectedPolygons = useMemo(() => {
+    const first = wb.selectedFeatures[0];
+    if (!first) return null;
+    const layer = wb.displayLayers.find((candidate) => candidate.id === first.layerId);
+    if (!layer) return null;
+    const indexes = wb.selectedFeatures
+      .filter((selection) => selection.layerId === layer.id)
+      .map((selection) => selection.index)
+      .filter((index) => {
+        const type = layer.data.features[index]?.geometry?.type;
+        return type === "Polygon" || type === "MultiPolygon";
+      });
+    return indexes.length ? { layer, indexes } : null;
+  }, [wb.selectedFeatures, wb.displayLayers]);
+
   const changeBoundary = (value: string) => {
+    if (value === "selection") {
+      const boundary = selectedPolygons
+        ? studyBoundaryFromSelection(selectedPolygons.layer, selectedPolygons.indexes)
+        : null;
+      if (!boundary) {
+        toast.error("Select one or more polygons on the map first.");
+        return;
+      }
+      update({ ...workspace, boundary });
+      return;
+    }
     if (value.startsWith("layer:")) {
       const layer = wb.displayLayers.find((candidate) => candidate.id === value.slice(6));
       const boundary = layer ? studyBoundaryFromLayer(layer) : null;
@@ -441,9 +510,22 @@ export function StudyReportWorkspace() {
                   disabled={!wb.canEditProject}
                   className="min-h-10 w-full min-w-0 rounded-xl border border-border bg-background px-3 text-sm"
                 >
-                  <option value="current-view">Current map view</option>
+                  <option value="current-view">Current map view (rectangle)</option>
                   <option value="project-area" disabled={!wb.projectArea?.bounds}>
-                    Saved project area{wb.projectArea?.bounds ? "" : " (not set)"}
+                    Saved project area (rectangle){wb.projectArea?.bounds ? "" : ", not set"}
+                  </option>
+                  <option
+                    value="selection"
+                    disabled={
+                      !selectedPolygons && workspace.boundary?.sourceFeatures !== "selected"
+                    }
+                  >
+                    Selected polygons on the map
+                    {selectedPolygons
+                      ? ` (${selectedPolygons.indexes.length})`
+                      : workspace.boundary?.sourceFeatures === "selected"
+                        ? ""
+                        : ", none selected"}
                   </option>
                   {polygonLayers.map((layer) => (
                     <option key={layer.id} value={`layer:${layer.id}`}>
@@ -459,6 +541,9 @@ export function StudyReportWorkspace() {
                     maximumFractionDigits: 1,
                   })}{" "}
                   acres
+                  {workspace.boundary.source !== "layer"
+                    ? ". This is a rectangle, not a property line. Select parcels or choose a polygon layer for a parcel-specific study."
+                    : ""}
                 </p>
               ) : null}
               <button
@@ -506,9 +591,10 @@ export function StudyReportWorkspace() {
                 </p>
               ) : null}
               <p className="text-[11px] leading-4 text-muted-foreground">
-                Analysis refreshes active viewport services for the exact study boundary, tests
-                spatial intersections, clips mapped polygon coverage, summarizes useful attributes
-                and regenerates section-specific maps. Provider limits and failures stay visible.
+                Analysis queries each active live source for the study boundary plus its listed
+                search distance, separates on-site from nearby features, measures terrain from the
+                USGS grid and regenerates section maps. Failed or incomplete sources are reported as
+                not evaluated, never as no findings.
               </p>
             </div>
           </details>
@@ -759,16 +845,34 @@ function ContentsPage({
                   {sectionStatus[result.status].label}
                 </span>
               ) : null}
-              <span className="w-6 text-right text-[#657168]">{index + 3}</span>
             </li>
           );
         })}
       </ol>
       <div className="mt-10 rounded-2xl border border-[#e1c878] bg-[#fff9df] p-5 text-sm leading-6 text-[#58471a]">
         <strong className="block">How to read this report</strong>
-        Observed project/public data and LandDraft-derived summaries remain source-attributed.
-        User-authored findings are shown separately. An Insufficient Data section is a required
-        follow-up item—not a favorable finding.
+        <ul className="mt-2 grid list-disc gap-1 pl-4">
+          <li>
+            <strong>Mapped record:</strong> what a publisher's data shows. Records can be old,
+            incomplete or approximate.
+          </li>
+          <li>
+            <strong>Derived estimate:</strong> LandDraft's calculation over those records, such as
+            acres within a boundary or a measured slope band.
+          </li>
+          <li>
+            <strong>Screening assumption:</strong> a rule chosen for screening, such as a Buildable
+            Area buffer. It is not a legal setback.
+          </li>
+          <li>
+            <strong>Professional determination:</strong> never produced here. Survey, title,
+            engineering, environmental and legal conclusions need a qualified professional.
+          </li>
+        </ul>
+        <p className="mt-2">
+          User-authored findings are shown separately. An Insufficient Data section is a required
+          follow-up item, not a favorable finding. A failed source means not evaluated.
+        </p>
       </div>
     </article>
   );
@@ -791,9 +895,16 @@ function ReportSectionPage({
     const layer = layers.find((candidate) => candidate.id === id);
     return layer ? [layer] : [];
   });
-  const elevation = mappedLayers.map(elevationFromLayer).find(Boolean) ?? null;
-  const buildableLayer = mappedLayers.find((layer) => snapshotFromLayer(layer));
+  const sectionLayers = result.layerIds.flatMap((id) => {
+    const layer = layers.find((candidate) => candidate.id === id);
+    return layer ? [layer] : [];
+  });
+  const elevation = sectionLayers.map(elevationFromLayer).find(Boolean) ?? null;
+  const buildableLayer = sectionLayers.find((layer) => snapshotFromLayer(layer));
   const buildable = buildableLayer ? snapshotFromLayer(buildableLayer) : null;
+  const statusFor = (layerId: string) =>
+    workspace.currentRun?.layerStatuses?.find((status) => status.layerId === layerId);
+  const quietSources = studyQuietSources(result, workspace.currentRun);
   const showMap = Boolean(
     workspace.boundary &&
     (mappedLayers.length || config.id === "study-area") &&
@@ -869,6 +980,33 @@ function ReportSectionPage({
           </ul>
         </div>
       ) : null}
+      {result.highlights?.length ? (
+        <div className="mt-4 rounded-xl border border-[#dce2d9] p-4 text-[11px] leading-5 text-[#34463a]">
+          <strong className="block text-[10px] tracking-wide text-[#405448] uppercase">
+            Mapped on site
+          </strong>
+          <p className="text-[9px] text-[#59675e]">
+            Records from the sources listed in each section. These are not conclusions about the
+            site, and sources that failed or found nothing are not listed here.
+          </p>
+          <ul className="mt-1 grid list-disc gap-1 pl-4">
+            {result.highlights.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {(config.id === "executive-summary" || config.id === "sources") &&
+      (workspace.currentRun?.warnings.length ?? 0) > 0 ? (
+        <div className="mt-4 rounded-xl border border-[#e3bd73] bg-[#fff8e3] p-4 text-[11px] leading-5 text-[#684c16]">
+          <strong className="block">Warnings for this run</strong>
+          <ul className="mt-1 grid list-disc gap-1 pl-4">
+            {workspace.currentRun!.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {result.metrics.length ? (
         <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {result.metrics.map((metric) => (
@@ -880,54 +1018,109 @@ function ReportSectionPage({
               {metric.note ? (
                 <span className="text-[9px] text-[#6a766d]">{metric.note}</span>
               ) : null}
+              {metric.basis ? (
+                <span className="mt-1 block text-[8px] tracking-wide text-[#6a766d] uppercase">
+                  {metric.basis === "mapped"
+                    ? "Mapped record"
+                    : metric.basis === "derived"
+                      ? "Derived estimate"
+                      : "Screening assumption"}
+                </span>
+              ) : null}
             </div>
           ))}
         </div>
       ) : null}
+      {result.measurements?.map((measurement) => (
+        <div
+          key={measurement.id}
+          className="mt-5 overflow-hidden rounded-xl border border-[#dce2d9]"
+        >
+          <div className="bg-[#edf2eb] px-3 py-2">
+            <strong className="text-[10px] tracking-wide text-[#405448] uppercase">
+              {measurement.title} · Derived estimate
+            </strong>
+            <p className="mt-1 text-[9px] leading-4 text-[#59675e]">{measurement.method}</p>
+          </div>
+          <table className="w-full border-collapse text-left text-[10px]">
+            <tbody>
+              {measurement.rows.map((row) => (
+                <tr key={row.label} className="border-t border-[#dce2d9]">
+                  <td className="p-2 font-semibold text-[#24392b]">{row.label}</td>
+                  <td className="p-2 text-right text-[#24392b]">{row.value}</td>
+                  <td className="p-2 text-[#526157]">{row.note ?? ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="border-t border-[#dce2d9] px-3 py-2 text-[9px] leading-4 text-[#59675e]">
+            {measurement.limitation} Source: {measurement.sourceName}, retrieved{" "}
+            {new Date(measurement.retrievedAt).toLocaleDateString()}.
+          </p>
+        </div>
+      ))}
       {result.analysis?.layers.length ? (
         <div className="mt-5 overflow-hidden rounded-xl border border-[#dce2d9]">
           <div className="bg-[#edf2eb] px-3 py-2">
             <strong className="text-[10px] tracking-wide text-[#405448] uppercase">
-              Evidence analyzed inside the boundary
+              What was found
             </strong>
             <p className="mt-1 text-[9px] leading-4 text-[#59675e]">{result.analysis.method}</p>
           </div>
           <table className="w-full border-collapse text-left text-[9px]">
             <thead className="bg-[#f7f8f4] text-[#526157]">
               <tr>
-                <th className="p-2">Layer</th>
-                <th className="p-2 text-right">Features</th>
-                <th className="p-2">Geometry / coverage</th>
-                <th className="p-2">Leading attributes</th>
+                <th className="p-2">Source</th>
+                <th className="p-2 text-right">On site</th>
+                <th className="p-2">Area / length inside the boundary</th>
+                <th className="p-2">Nearby, outside the boundary</th>
+                <th className="p-2">Attributes of on-site features</th>
               </tr>
             </thead>
             <tbody>
-              {result.analysis.layers.slice(0, 12).map((layer) => (
+              {result.analysis.layers.slice(0, 14).map((layer) => (
                 <tr key={layer.layerId} className="border-t border-[#dce2d9] align-top">
                   <td className="p-2 font-semibold text-[#24392b]">{layer.name}</td>
-                  <td className="p-2 text-right">{layer.featureCount.toLocaleString()}</td>
+                  <td className="p-2 text-right">
+                    {statusFor(layer.layerId)?.state === "truncated" ? "≥ " : ""}
+                    {layer.featureCount.toLocaleString()}
+                  </td>
                   <td className="p-2 text-[#526157]">
-                    {[
-                      layer.pointCount ? `${layer.pointCount} point` : "",
-                      layer.lineCount ? `${layer.lineCount} line` : "",
-                      layer.polygonCount ? `${layer.polygonCount} polygon` : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
                     {layer.mappedCoverageAcres !== undefined ? (
                       <span className="block">
-                        {layer.mappedCoverageAcres.toLocaleString("en-US", {
-                          maximumFractionDigits: 1,
-                        })}{" "}
-                        acres (
-                        {(layer.mappedCoveragePercent ?? 0).toLocaleString("en-US", {
-                          maximumFractionDigits: 1,
-                        })}
-                        %)
+                        {studyAcres(layer.mappedCoverageAcres)} ac (
+                        {studyPercent(layer.mappedCoveragePercent ?? 0)}% of study)
                       </span>
                     ) : null}
+                    {layer.onSiteLineMiles ? (
+                      <span className="block">
+                        {layer.onSiteLineMiles.toLocaleString("en-US", {
+                          maximumFractionDigits: 2,
+                        })}{" "}
+                        mi of line
+                      </span>
+                    ) : null}
+                    {layer.coverageClasses?.map((item) => (
+                      <span key={item.value} className="block">
+                        {item.value}: {studyAcres(item.acres)} ac ({studyPercent(item.percent)}%)
+                      </span>
+                    ))}
+                    {layer.note ? <span className="block italic">{layer.note}</span> : null}
                   </td>
-                  <td className="max-w-[2.4in] p-2 text-[#526157]">
+                  <td className="p-2 text-[#526157]">
+                    {layer.nearby
+                      ? layer.nearby.count
+                        ? `${layer.nearby.count.toLocaleString()} within ${layer.nearby.searchMiles} mi. Nearest about ${
+                            (layer.nearby.nearestMiles ?? 0) < 0.1
+                              ? "under 0.1"
+                              : (layer.nearby.nearestMiles ?? 0).toLocaleString("en-US", {
+                                  maximumFractionDigits: 1,
+                                })
+                          } mi ${layer.nearby.nearestDirection ?? ""}${layer.nearby.nearestLabel ? ` (${layer.nearby.nearestLabel})` : ""}`
+                        : `None within ${layer.nearby.searchMiles} mi`
+                      : "Not searched"}
+                  </td>
+                  <td className="max-w-[2in] p-2 text-[#526157]">
                     {layer.attributes.length
                       ? layer.attributes
                           .map(
@@ -938,12 +1131,31 @@ function ReportSectionPage({
                                 .join(", ")}`,
                           )
                           .join("; ")
-                      : "No concise categorical attribute summary"}
+                      : "None summarized"}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      ) : null}
+      {config.id !== "sources" && config.id !== "executive-summary" && quietSources.length ? (
+        <div className="mt-4 rounded-xl border border-[#dce2d9] p-3 text-[9px] leading-4 text-[#526157]">
+          <strong className="text-[10px] tracking-wide text-[#405448] uppercase">
+            Sources with nothing on site
+          </strong>
+          <ul className="mt-1 grid gap-0.5">
+            {quietSources.map((source) => (
+              <li key={source.id}>
+                <span className="font-semibold text-[#24392b]">{source.name}:</span>{" "}
+                {source.queryState === "complete"
+                  ? `queried, none mapped inside the boundary. Not proof of absence.${source.coverage ? ` This source only covers ${source.coverage}.` : ""}`
+                  : source.queryMessage && source.queryState !== "visual-only"
+                    ? `${studyQueryStateLabel(source.queryState!)}. ${source.queryMessage}`
+                    : studyQueryStateLabel(source.queryState!)}
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
       {showMap && workspace.boundary ? (
@@ -952,7 +1164,38 @@ function ReportSectionPage({
             title={config.title}
             boundary={workspace.boundary}
             layers={mappedLayers}
+            snapshot={workspace.currentRun?.figureSnapshot}
           />
+        </div>
+      ) : null}
+      {result.guidance ? (
+        <div className="mt-5 grid gap-3 text-[11px] leading-5 text-[#34463a] sm:grid-cols-3">
+          <div>
+            <strong className="block text-[10px] tracking-wide text-[#405448] uppercase">
+              Why it matters
+            </strong>
+            {result.guidance.whyItMatters}
+          </div>
+          <div>
+            <strong className="block text-[10px] tracking-wide text-[#405448] uppercase">
+              Not evaluated
+            </strong>
+            <ul className="list-disc pl-4">
+              {result.guidance.notEvaluated.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <strong className="block text-[10px] tracking-wide text-[#405448] uppercase">
+              Next verification step
+            </strong>
+            <ul className="list-disc pl-4">
+              {result.guidance.nextSteps.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
         </div>
       ) : null}
       {elevation && config.id === "terrain" ? (
@@ -983,6 +1226,11 @@ function ReportSectionPage({
             alt="Saved LandDraft buildable-area screening summary"
             className="w-full"
           />
+          <figcaption className="border-t border-[#dce2d9] px-3 py-2 text-[10px] leading-4 text-[#59675e]">
+            Saved Buildable Area result. Screening assumptions under the rules selected in that
+            analysis, calculated on its own boundary and run date, which may differ from this study.
+            It does not establish buildability.
+          </figcaption>
         </figure>
       ) : null}
       {config.id === "sources" && result.sources.length ? (
@@ -991,23 +1239,42 @@ function ReportSectionPage({
             <thead className="bg-[#edf2eb] text-[#405448]">
               <tr>
                 <th className="p-2">Source</th>
-                <th className="p-2">Evidence</th>
-                <th className="p-2">Attribution / URL</th>
+                <th className="p-2">This run</th>
+                <th className="p-2">Publisher date / update cycle</th>
+                <th className="p-2">Attribution, terms and limits</th>
               </tr>
             </thead>
             <tbody>
               {result.sources.map((source) => (
                 <tr key={source.id} className="border-t border-[#dce2d9] align-top">
-                  <td className="p-2 font-semibold">{source.name}</td>
-                  <td className="p-2 capitalize">{source.evidence.replace("-", " ")}</td>
-                  <td className="max-w-[3.6in] break-words p-2 text-[#526157]">
-                    {source.attribution ?? "No separate attribution recorded"}
-                    {source.url ? (
-                      <>
-                        <br />
-                        {source.url}
-                      </>
+                  <td className="p-2 font-semibold">
+                    {source.name}
+                    <span className="block font-normal text-[#526157] capitalize">
+                      {source.evidence.replace("-", " ")}
+                    </span>
+                  </td>
+                  <td className="p-2 text-[#526157]">
+                    {source.queryState ? studyQueryStateLabel(source.queryState) : "Not recorded"}
+                    {source.retrievedAt ? (
+                      <span className="block">
+                        {new Date(source.retrievedAt).toLocaleDateString()}
+                      </span>
                     ) : null}
+                    {source.queryMessage ? (
+                      <span className="block italic">{source.queryMessage}</span>
+                    ) : null}
+                  </td>
+                  <td className="p-2 text-[#526157]">
+                    {source.updateCadence ?? "Not stated by publisher"}
+                  </td>
+                  <td className="max-w-[3in] break-words p-2 text-[#526157]">
+                    {source.attribution ?? "No separate attribution recorded"}
+                    {source.license ? <span className="block">{source.license}</span> : null}
+                    {source.limitations ? (
+                      <span className="block">{source.limitations}</span>
+                    ) : null}
+                    {source.sourcePage ? <span className="block">{source.sourcePage}</span> : null}
+                    {source.url ? <span className="block">{source.url}</span> : null}
                   </td>
                 </tr>
               ))}
@@ -1041,7 +1308,10 @@ function ReportPageHeader({
       <span className="flex items-center gap-2 font-semibold text-[#2f553c]">
         <Check className="size-3.5" /> {workspace.cover.company || "LandDraft Study Area Report"}
       </span>
-      <span>Page {pageNumber}</span>
+      {/* Sections can run past one printed sheet, so a fixed page number would be wrong. */}
+      <span>
+        {pageNumber > 2 ? `Section ${String(pageNumber - 2).padStart(2, "0")}` : "Contents"}
+      </span>
     </header>
   );
 }
