@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { installViewportSync } from "../lib/viewportSync";
+import { installTestSiteTitle } from "../lib/testSiteTitle";
 import { AuthProvider } from "../lib/auth";
 import { ButtonHelpProvider } from "../components/ui/ButtonHelpProvider";
 
@@ -166,6 +167,7 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
   useEffect(() => installViewportSync(window, document.documentElement.style), []);
+  useEffect(() => installTestSiteTitle(window.location.hostname, document), []);
 
   return (
     <QueryClientProvider client={queryClient}>

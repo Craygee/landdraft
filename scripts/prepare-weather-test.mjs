@@ -74,6 +74,12 @@ else
       XWEATHER_CREDENTIAL_ENCRYPTION_KEY: env.XWEATHER_CREDENTIAL_ENCRYPTION_KEY,
     }),
   );
+// Name the installed app "Test-LandDraft" so a home-screen icon is not mistaken for landdraft.net.
+const manifestFile = join(publicRoot, "site.webmanifest");
+const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
+manifest.name = `Test-${manifest.name}`;
+manifest.short_name = `Test-${manifest.short_name}`;
+await writeFile(manifestFile, JSON.stringify(manifest, null, 2) + "\n");
 const headersFile = join(publicRoot, "_headers");
 const headers = await readFile(headersFile, "utf8").catch(() => "");
 await writeFile(headersFile, headers + "\n/*\n  X-Robots-Tag: noindex, nofollow\n");
