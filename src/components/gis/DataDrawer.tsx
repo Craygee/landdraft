@@ -967,7 +967,7 @@ export function DataDrawer() {
                         {entry.url && (
                           <span className="rounded-full bg-secondary px-2 py-0.5">
                             {entry.id === "tx-parcels"
-                              ? "Borders and large-parcel labels 10+"
+                              ? "Large parcels 8+ · full detail 12+"
                               : `zoom ${entry.minZoom ?? (entry.geometry === "point" ? 7 : 5)}+`}
                           </span>
                         )}

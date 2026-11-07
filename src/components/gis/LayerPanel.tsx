@@ -90,7 +90,7 @@ const remoteLoadLabel = (layer: GisLayer) => {
   if (layer.source.loadStatus === "complete")
     return `${loaded.toLocaleString()} visible features · complete`;
   if (layer.source.catalogId === "tx-parcels" && layer.data.features.length === 0)
-    return "Borders from zoom 10 · large-parcel labels from 11";
+    return "Large parcels from zoom 8 · full detail at zoom 12+";
   if (layer.source.minZoom !== undefined && layer.data.features.length === 0)
     return `Ready · appears at zoom ${layer.source.minZoom}+`;
   return `${layer.data.features.length.toLocaleString()} visible features`;

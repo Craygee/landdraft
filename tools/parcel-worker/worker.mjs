@@ -7,9 +7,9 @@ const cors = {
 };
 
 const publicFile =
-  /^\/texas\/versions\/[a-f0-9]{16}\/(?:manifest\.json|part-\d{4}\.fgb|unmapped-\d{4}\.parquet|search\/[-a-z0-9_/]+\/(?:index\.json|data\.pack))$/;
+  /^\/texas\/versions\/[a-f0-9]{16}\/(?:manifest\.json|(?:part|overview)-\d{4}\.fgb|unmapped-\d{4}\.parquet|search\/[-a-z0-9_/]+\/(?:index\.json|data\.pack))$/;
 const publicKey =
-  /^texas\/versions\/[a-f0-9]{16}\/(?:manifest\.json|part-\d{4}\.fgb|unmapped-\d{4}\.parquet|search\/[-a-z0-9_/]+\/(?:index\.json|data\.pack))$/;
+  /^texas\/versions\/[a-f0-9]{16}\/(?:manifest\.json|(?:part|overview)-\d{4}\.fgb|unmapped-\d{4}\.parquet|search\/[-a-z0-9_/]+\/(?:index\.json|data\.pack))$/;
 const normalize = (value) =>
   String(value ?? "")
     .normalize("NFKD")

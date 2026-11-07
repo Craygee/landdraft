@@ -77,12 +77,12 @@ export const catalog: CatalogEntry[] = [
     connection: "refresh",
     updateCadence: "County editions vary; generally annual",
     description:
-      "Statewide TxGIO 2025 archive, stored by LandDraft and queried by map area. 253 counties; Donley is absent from this release. Borders and large-parcel labels from zoom 10; labels start small and grow to normal size at zoom 14. Full parcel detail at zoom 12+. Original county dates and appraisal attributes are preserved. Not a survey.",
+      "Statewide TxGIO 2025 archive, stored by LandDraft and queried by map area. 253 counties; Donley is absent from this release. Large parcels and their labels from zoom 8 (80+ acres below zoom 10, 5+ acres at zoom 10-11); labels start small and grow to normal size at zoom 14. Full parcel detail at zoom 12+. Original county dates and appraisal attributes are preserved. Not a survey.",
     url: "https://landdraft-public-parcels.tight-sky-0ae1.workers.dev/texas/current.json",
     sourcePage: "https://gio.texas.gov/stratmap/land-parcels.html",
     keywords: ["parcel", "property", "tax", "owner", "appraisal", "cad"],
     requiresViewport: true,
-    minZoom: 10,
+    minZoom: 8,
     countyField: "county",
     license:
       "CC0-1.0 — TxGIO collection license. Contributing appraisal districts; provided AS-IS, not authoritative cadastral surveys.",

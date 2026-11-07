@@ -3,7 +3,7 @@ import type { GisLayer } from "./types.ts";
 
 export const PARCEL_OVERVIEW_ZOOM = 10;
 /** Bump when the shipped parcel display defaults change; older saved layers migrate once. */
-export const PARCEL_DISPLAY_VERSION = 3;
+export const PARCEL_DISPLAY_VERSION = 4;
 /** Labels shrink down to this many pixels when zoomed out, so large parcels keep a label. */
 export const PARCEL_LABEL_MIN_SIZE = 4;
 /** Zoom at or below which parcel labels use their smallest size. */

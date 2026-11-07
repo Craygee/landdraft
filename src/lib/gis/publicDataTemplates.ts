@@ -229,7 +229,7 @@ export const catalogLayerStyle = (entry: CatalogEntry): Partial<LayerStyle> => {
       labelEnabled: true,
       labelTemplate: "{OWNER_NAME}",
       labelFields: ["OWNER_NAME"],
-      labelMinZoom: 10,
+      labelMinZoom: 8,
       labelSize: 11,
       labelScaleWithZoom: true,
       ...published,

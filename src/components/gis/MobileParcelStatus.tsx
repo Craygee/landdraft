@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { useWorkbench } from "@/lib/gis/store";
 import { isParcelLayer, PARCEL_DISPLAY_VERSION } from "@/lib/gis/parcelDisplay";
-import { TEXAS_PARCEL_URL } from "@/lib/gis/texasParcels";
+import { PARCEL_OVERVIEW_MIN_ZOOM, TEXAS_PARCEL_URL } from "@/lib/gis/texasParcels";
 import type { GisLayer } from "@/lib/gis/types";
 
 /** Inspect the actual project layer, not just the public catalog's manifest health. */
@@ -62,7 +62,7 @@ export function MobileParcelStatus() {
           catalogId: "tx-parcels",
           url: TEXAS_PARCEL_URL,
           requiresViewport: true,
-          minZoom: 10,
+          minZoom: PARCEL_OVERVIEW_MIN_ZOOM,
           parcelDisplayVersion: PARCEL_DISPLAY_VERSION,
         },
         style,
@@ -78,7 +78,7 @@ export function MobileParcelStatus() {
         ...layer.source,
         url: TEXAS_PARCEL_URL,
         requiresViewport: true,
-        minZoom: 10,
+        minZoom: PARCEL_OVERVIEW_MIN_ZOOM,
         parcelDisplayVersion: PARCEL_DISPLAY_VERSION,
         refreshToken: (layer.source.refreshToken ?? 0) + 1,
       },
@@ -94,8 +94,8 @@ export function MobileParcelStatus() {
     >
       <h3 className="text-sm font-semibold">Texas parcel display · zoom {zoom.toFixed(1)}</h3>
       <p className="text-xs text-muted-foreground">
-        Borders from zoom 10. Large-parcel labels from 11, growing to normal size at 13. Full detail
-        at 12+.
+        Large parcels from zoom 8 (80+ acres, then 5+ acres from zoom 10). Labels start small and
+        grow to normal size at 14. Full detail at 12+.
       </p>
       {!layers.length && (
         <>

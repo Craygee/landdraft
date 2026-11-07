@@ -6,8 +6,14 @@ const source = JSON.parse(await readFile(join(base, "current.json"), "utf8"));
 const version = source.sha256.slice(0, 16),
   folder = join(base, "index", version);
 const manifest = JSON.parse(await readFile(join(folder, "manifest.json"), "utf8"));
+// full: everything; search-only: search shards; overview-only: overview tiers.
+const uploadMode =
+  process.env.PARCEL_UPLOAD_MODE ??
+  (process.env.PARCEL_SEARCH_ONLY === "1" ? "search-only" : "full");
+if (!["full", "search-only", "overview-only"].includes(uploadMode))
+  throw new Error(`Unknown parcel upload mode ${uploadMode}`);
 let searchObjects = [];
-if (manifest.search?.status === "ready")
+if (manifest.search?.status === "ready" && uploadMode !== "overview-only")
   searchObjects = JSON.parse(await readFile(join(folder, "search", "objects.json"), "utf8"));
 const wrangler = process.env.PARCEL_WRANGLER_JS;
 if (!wrangler && !process.env.PARCEL_PUBLISH_TOKEN)
@@ -95,10 +101,13 @@ async function httpPut(file, key) {
 }
 const put = process.env.PARCEL_PUBLISH_TOKEN ? httpPut : cliPut;
 // Sequential receipts are durable; upload parts in bounded parallel batches.
-const spatialFiles =
-  process.env.PARCEL_SEARCH_ONLY === "1" ? [] : [...manifest.parts, ...manifest.unmapped];
+const spatialFiles = uploadMode === "full" ? [...manifest.parts, ...manifest.unmapped] : [];
+const overviewFiles = manifest.overview?.tiers ?? [];
+if (uploadMode === "overview-only" && !overviewFiles.length)
+  throw new Error("No overview tiers were built");
 const files = [
   ...spatialFiles.map((item) => ({ ...item, local: item.file, key: item.file })),
+  ...overviewFiles.map((item) => ({ ...item, local: item.file, key: item.file })),
   ...searchObjects.map((item) => ({
     ...item,
     local: join("search", item.file),
@@ -109,7 +118,7 @@ for (let i = 0; i < files.length; i += 3) {
   await Promise.all(
     files.slice(i, i + 3).map(async (part) => {
       if (
-        !/^(?:part-\d{4}\.fgb|unmapped-\d{4}\.parquet|search\/(?:id|owner|address|county|block\/\d{5}|section\/\d{5})\/(?:index\.json|data\.pack))$/.test(
+        !/^(?:part-\d{4}\.fgb|overview-\d{4}\.fgb|unmapped-\d{4}\.parquet|search\/(?:id|owner|address|county|block\/\d{5}|section\/\d{5})\/(?:index\.json|data\.pack))$/.test(
           part.key,
         )
       )
