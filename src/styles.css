@@ -242,6 +242,21 @@
   overscroll-behavior: none;
 }
 
+/* Sizes measured by src/lib/viewportSync.ts, because iOS Safari can keep the previous
+   orientation's size for fixed layouts after a rotation. */
+@media screen {
+  html,
+  body {
+    width: var(--app-live-width, 100%);
+    height: var(--app-live-height, 100%);
+  }
+
+  .app-viewport {
+    width: var(--app-live-width, auto);
+    height: var(--app-live-height, auto);
+  }
+}
+
 /*
  * Terrain 3D needs a definite block size for MapLibre. Some mobile and tablet
  * browsers otherwise resolve the flex child from its 240px fallback, leaving
@@ -396,7 +411,10 @@
     left: max(0.75rem, env(safe-area-inset-left, 0px));
     flex-direction: row;
   }
+}
 
+/* Weather's bottom tab bar shows below Tailwind's lg breakpoint, tablets included. */
+@media (max-width: 63.999rem) {
   .weather-workspace .maplibregl-ctrl-bottom-right,
   .weather-workspace .maplibregl-ctrl-bottom-left {
     bottom: calc(4.75rem + env(safe-area-inset-bottom, 0px));

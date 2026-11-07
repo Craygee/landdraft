@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { installViewportSync } from "../lib/viewportSync";
 import { AuthProvider } from "../lib/auth";
 import { ButtonHelpProvider } from "../components/ui/ButtonHelpProvider";
 
@@ -163,6 +164,8 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+
+  useEffect(() => installViewportSync(window, document.documentElement.style), []);
 
   return (
     <QueryClientProvider client={queryClient}>

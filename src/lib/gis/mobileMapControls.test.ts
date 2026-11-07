@@ -48,6 +48,19 @@ for (const selector of [
   });
 }
 
+test("keeps Weather's controls above its tab bar wherever the bar shows", () => {
+  // WeatherWorkspace's tab bar is lg:hidden, so it shows below 64rem.
+  for (const selector of [
+    ".weather-workspace .maplibregl-ctrl-bottom-right",
+    ".weather-workspace .maplibregl-ctrl-bottom-left",
+    ".weather-workspace .landdraft-map-lock-controls",
+  ]) {
+    const rules = enclosingAtRules(selector);
+    assert.ok(rules.length > 0, `${selector} is missing`);
+    for (const atRules of rules) assert.ok(atRules.includes("@media (max-width: 63.999rem)"));
+  }
+});
+
 test("lifts the map controls at least as high as the bottom menu reaches", () => {
   // MobileWorkbench's nav is h-14 (3.5rem) plus a .5rem gap, topping out at 4rem.
   const block = /\.mobile-map-mode \.maplibregl-ctrl-bottom-left\s*\{([^}]*)\}/.exec(css)?.[1];
