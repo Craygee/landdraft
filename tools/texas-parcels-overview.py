@@ -80,13 +80,19 @@ def build(gdb, out, tiers=TIERS, batch_size=65536, log=print):
     collected = [[] for _ in tiers]
     started = time.time()
     scanned = 0
-    with pyogrio.open_arrow(gdb, use_pyarrow=True, batch_size=batch_size) as (meta, reader):
+    # The FileGDB OBJECTID is the feature ID, not a field; return_fids adds it as a column.
+    with pyogrio.open_arrow(gdb, use_pyarrow=True, return_fids=True, batch_size=batch_size) as (
+        meta,
+        reader,
+    ):
         if meta["crs"] != "EPSG:3857":
             raise ValueError("Source CRS changed; review required")
-        fields = resolve_fields(meta["fields"])
-        columns = [fields[name] for name in KEPT_FIELDS]
+        columns = None
         for index, batch in enumerate(reader):
             table = pa.Table.from_batches([batch])
+            if columns is None:
+                fields = resolve_fields(table.column_names)
+                columns = [fields[name] for name in KEPT_FIELDS]
             geometries = shapely.from_wkb(table[meta["geometry_name"]].to_pylist())
             usable = ~(shapely.is_missing(geometries) | shapely.is_empty(geometries))
             if not np.all(usable):
