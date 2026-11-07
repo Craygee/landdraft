@@ -1,6 +1,6 @@
 import { SharedNotesPanel } from "./SharedNotesPanel";
 import { WorkspaceLoading, WorkspaceRecoveryNotice } from "./WorkspaceLoading";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { WorkbenchProvider, useWorkbench } from "@/lib/gis/store";
 import { MapRefProvider, useMapRef } from "@/lib/gis/mapRef";
@@ -87,6 +87,37 @@ function WorkbenchShell() {
     if (window.innerWidth < 768) setPanelOpen(false);
   }, []);
 
+  // The search box and draw toolbar wrap onto extra rows on narrower screens.
+  // Publish where they end so the legend and drawing bars sit below them
+  // instead of underneath. Search results are left out on purpose, so the
+  // bars do not jump while someone types.
+  const mainRef = useRef<HTMLElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main || typeof ResizeObserver === "undefined") return;
+    const searchBar = searchRef.current?.firstElementChild?.firstElementChild ?? null;
+    const toolbar = toolbarRef.current;
+    const update = () => {
+      const top = main.getBoundingClientRect().top;
+      let bottom = 0;
+      for (const el of [searchBar, toolbar]) {
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.height > 0) bottom = Math.max(bottom, rect.bottom - top);
+      }
+      if (bottom > 0) main.style.setProperty("--map-top-inset", `${Math.round(bottom + 12)}px`);
+      else main.style.removeProperty("--map-top-inset");
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(main);
+    if (searchBar) observer.observe(searchBar);
+    if (toolbar) observer.observe(toolbar);
+    return () => observer.disconnect();
+  }, [wb.projectReady, wb.canEditProject, wb.canSearchMap]);
+
   if (!wb.projectReady) return <WorkspaceLoading />;
 
   return (
@@ -105,20 +136,22 @@ function WorkbenchShell() {
           {wb.canEditProject ? <LayerPanel /> : <SharedLayerPanel />}
         </aside>
 
-        <main className="relative min-w-0 flex-1">
+        <main ref={mainRef} className="relative min-w-0 flex-1">
           <MapCanvas />
           <FeatureAttributesWindow />
-          <div className="absolute right-3 top-20 z-30">
+          <div className="absolute right-3 top-[calc(var(--map-top-inset,4rem)+0.5rem)] z-30">
             <MapLegendControl />
           </div>
           {wb.canEditProject && <SelectionToolbar />}
 
           <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col gap-2 p-3">
             <div className="pointer-events-auto flex flex-wrap items-start justify-between gap-2">
-              <div data-tour="map-search">{wb.canSearchMap && <SearchBox />}</div>
+              <div ref={searchRef} data-tour="map-search">
+                {wb.canSearchMap && <SearchBox />}
+              </div>
               {wb.canEditProject && (
-                <div className="hidden md:block">
-                  <div data-tour="draw-toolbar">
+                <div className="hidden max-w-full md:block">
+                  <div ref={toolbarRef} data-tour="draw-toolbar">
                     <DrawToolbar />
                   </div>
                 </div>

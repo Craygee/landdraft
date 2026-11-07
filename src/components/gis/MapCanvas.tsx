@@ -1501,7 +1501,7 @@ export function MapCanvas() {
       {editEnabled && editableFeature && (
         <div
           data-tour="vertex-editor"
-          className="float-surface pointer-events-auto absolute left-1/2 top-16 z-20 w-[min(94vw,620px)] -translate-x-1/2 rounded-2xl p-2 shadow-float"
+          className="float-surface pointer-events-auto absolute left-1/2 top-[var(--map-top-inset,4rem)] z-20 w-[min(94vw,620px)] -translate-x-1/2 rounded-2xl p-2 shadow-float"
         >
           <div className="flex flex-wrap items-center justify-center gap-1">
             <span className="mr-1 px-1 text-[10px] font-semibold">
@@ -1583,7 +1583,7 @@ export function MapCanvas() {
       {(wb.drawMode !== "none" || draft.length > 0) && (
         <div
           className={cn(
-            "landdraft-drawing-helper pointer-events-auto absolute left-1/2 top-16 z-20 -translate-x-1/2 md:top-16",
+            "landdraft-drawing-helper pointer-events-auto absolute left-1/2 top-[var(--map-top-inset,4rem)] z-20 -translate-x-1/2",
             wb.drawMode === "select-multiple" && "mobile-selection-helper",
           )}
         >
